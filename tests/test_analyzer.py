@@ -96,7 +96,7 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
     
     @patch('github_stats_analyzer.api.GitHubAPIClient')
     def test_calculate_language_percentages(self, mock_api_client):
-        """测试语言百分比计算"""
+        """测试语言百分比计算和代码净变更计算"""
         # 创建分析器实例
         analyzer = GitHubStatsAnalyzer(
             username=self.username,
@@ -110,13 +110,20 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
             "TypeScript": 500
         }
         
+        # 设置代码变更统计
+        analyzer.code_additions = 1500
+        analyzer.code_deletions = 500
+        
         # 调用方法
         analyzer.calculate_language_percentages()
         
-        # 验证结果
+        # 验证语言统计结果
         self.assertEqual(analyzer.language_stats["Python"], 1000)
         self.assertEqual(analyzer.language_stats["JavaScript"], 500)
         self.assertEqual(analyzer.language_stats["TypeScript"], 500)
+        
+        # 验证代码净变更计算
+        self.assertEqual(analyzer.code_net_change, 1000)
     
     @patch('github_stats_analyzer.api.GitHubAPIClient')
     def test_print_json_results(self, mock_api_client):
@@ -132,6 +139,9 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
         analyzer.total_additions = 1000
         analyzer.total_deletions = 500
         analyzer.total_lines = 1500
+        analyzer.code_additions = 800
+        analyzer.code_deletions = 300
+        analyzer.code_net_change = 500
         analyzer.language_stats = {
             "Python": 1000,
             "JavaScript": 500
@@ -148,6 +158,9 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
         repo_stats.additions = 1000
         repo_stats.deletions = 500
         repo_stats.total_lines = 1500
+        repo_stats.code_additions = 800
+        repo_stats.code_deletions = 300
+        repo_stats.code_net_change = 500
         repo_stats.commit_count = 5
         repo_stats.languages = {"Python": 1000}
         
@@ -171,12 +184,102 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
         
         # 验证结果
         self.assertEqual(output["username"], self.username)
-        self.assertEqual(output["summary"]["repositories_count"], 1)
+        self.assertEqual(output["summary"]["total_repositories"], 1)
         self.assertEqual(output["summary"]["total_additions"], 1000)
         self.assertEqual(output["summary"]["total_deletions"], 500)
-        self.assertEqual(output["summary"]["total_lines_changed"], 1500)
+        self.assertEqual(output["summary"]["total_lines"], 1500)
+        self.assertEqual(output["summary"]["code_additions"], 800)
+        self.assertEqual(output["summary"]["code_deletions"], 300)
+        self.assertEqual(output["summary"]["code_net_change"], 500)
         self.assertEqual(len(output["repositories"]), 1)
         self.assertEqual(output["repositories"][0]["name"], "repo1")
+        self.assertEqual(output["repositories"][0]["code_additions"], 800)
+        self.assertEqual(output["repositories"][0]["code_deletions"], 300)
+        self.assertEqual(output["repositories"][0]["code_net_change"], 500)
+    
+    @patch('github_stats_analyzer.api.GitHubAPIClient')
+    def test_analyze_commits(self, mock_api_client):
+        """测试提交分析和代码变更统计"""
+        # 创建分析器实例
+        analyzer = GitHubStatsAnalyzer(
+            username=self.username,
+            excluded_languages=self.excluded_languages
+        )
+        
+        # 创建仓库对象
+        repo = Repository(
+            name="repo1",
+            full_name="test-user/repo1",
+            fork=False,
+            stargazers_count=10,
+            created_at="2020-01-01T00:00:00Z"
+        )
+        
+        # 创建仓库统计对象
+        repo_stats = RepoStats(
+            name="repo1",
+            full_name="test-user/repo1",
+            is_fork=False,
+            stars=10,
+            created_at="2020-01-01T00:00:00Z"
+        )
+        
+        # 模拟 API 客户端
+        mock_client = mock_api_client.return_value
+        
+        # 模拟提交数据
+        from github_stats_analyzer.models import Commit, CommitFile
+        
+        commit1 = Commit(
+            sha="abc123",
+            additions=100,
+            deletions=50,
+            total=150
+        )
+        
+        commit2 = Commit(
+            sha="def456",
+            additions=200,
+            deletions=100,
+            total=300
+        )
+        
+        # 添加文件信息
+        commit1.files = [
+            CommitFile(filename="file1.py", additions=80, deletions=40),
+            CommitFile(filename="file2.md", additions=20, deletions=10)
+        ]
+        
+        commit2.files = [
+            CommitFile(filename="file3.py", additions=150, deletions=80),
+            CommitFile(filename="file4.css", additions=50, deletions=20)
+        ]
+        
+        # 设置模拟返回值
+        mock_client.get_repo_commits.return_value = asyncio.Future()
+        mock_client.get_repo_commits.return_value.set_result([commit1, commit2])
+        
+        mock_client.get_commit_detail.side_effect = lambda repo_name, sha: {
+            "abc123": asyncio.Future(),
+            "def456": asyncio.Future()
+        }[sha]
+        
+        mock_client.get_commit_detail.return_value.set_result(commit1)
+        mock_client.get_commit_detail.return_value.set_result(commit2)
+        
+        # 运行测试
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        loop.run_until_complete(analyzer.analyze_commits(repo, repo_stats))
+        
+        # 验证结果
+        self.assertEqual(repo_stats.additions, 300)
+        self.assertEqual(repo_stats.deletions, 150)
+        self.assertEqual(repo_stats.total_lines, 450)
+        self.assertEqual(repo_stats.code_additions, 230)  # 80 + 150 (只计算 .py 文件)
+        self.assertEqual(repo_stats.code_deletions, 120)  # 40 + 80 (只计算 .py 文件)
+        self.assertEqual(repo_stats.code_net_change, 110)  # 230 - 120
 
 
 class TestGitHubAPIClient(unittest.TestCase):

@@ -21,7 +21,8 @@ from github_stats_analyzer.config import (
 from github_stats_analyzer.models import (
     Repository,
     Commit,
-    AccessLevel
+    AccessLevel,
+    CommitFile
 )
 from github_stats_analyzer.logger import logger
 
@@ -245,10 +246,23 @@ class GitHubAPIClient:
         # Calculate additions and deletions
         additions = 0
         deletions = 0
+        files_list = []
         
         for file in commit_data.get("files", []):
-            additions += file.get("additions", 0)
-            deletions += file.get("deletions", 0)
+            file_additions = file.get("additions", 0)
+            file_deletions = file.get("deletions", 0)
+            additions += file_additions
+            deletions += file_deletions
+            
+            # Create CommitFile object
+            commit_file = CommitFile(
+                filename=file.get("filename", ""),
+                additions=file_additions,
+                deletions=file_deletions,
+                changes=file.get("changes", 0),
+                status=file.get("status", "")
+            )
+            files_list.append(commit_file)
         
         # Create Commit object
         commit = Commit(
@@ -262,7 +276,8 @@ class GitHubAPIClient:
             deletions=deletions,
             total=additions + deletions,
             url=commit_data.get("url", ""),
-            html_url=commit_data.get("html_url", "")
+            html_url=commit_data.get("html_url", ""),
+            files=files_list
         )
         
         return commit

@@ -57,6 +57,9 @@ run_test "version_command" "python -m github_stats_analyzer.main -v" "GitHub Sta
 # 测试基本访问级别
 run_test "basic_access" "python -m github_stats_analyzer.main octocat --access-level basic --max-repos 2" "GitHub Statistics for octocat"
 
+# 测试完整访问级别和代码变更统计
+run_test "full_access_with_code_stats" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Code Changes (Code Files Only)"
+
 # 测试不同输出格式
 run_test "json_output" "python -m github_stats_analyzer.main octocat -o json --max-repos 1" "\"username\": \"octocat\""
 run_test "csv_output" "python -m github_stats_analyzer.main octocat -o csv --max-repos 1" "GitHub Statistics for,octocat"
@@ -68,6 +71,10 @@ run_test "commit_limit" "python -m github_stats_analyzer.main octocat --max-comm
 # 测试语言过滤
 run_test "include_all_languages" "python -m github_stats_analyzer.main octocat --include-all --max-repos 1" "Language Breakdown"
 run_test "exclude_languages" "python -m github_stats_analyzer.main octocat --exclude-languages JavaScript --max-repos 1" "Language Breakdown"
+
+# 测试代码变更统计
+run_test "code_changes_stats" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Code +/-"
+run_test "code_net_change" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Net Change"
 
 # 测试组合参数
 run_test "combined_params" "python -m github_stats_analyzer.main octocat -o json --max-repos 1 --max-commits 5 --include-all" "\"username\": \"octocat\""

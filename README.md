@@ -5,6 +5,16 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![PyPI version](https://badge.fury.io/py/github-stats-analyzer.svg)](https://badge.fury.io/py/github-stats-analyzer)
 [![PyPI downloads](https://img.shields.io/pypi/dm/github-stats-analyzer.svg)](https://pypi.org/project/github-stats-analyzer/)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/SakuraPuare/github-stats-analyzer/test.yml?branch=main&label=tests)](https://github.com/SakuraPuare/github-stats-analyzer/actions/workflows/test.yml)
+[![GitHub stars](https://img.shields.io/github/stars/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/pulls)
+[![GitHub last commit](https://img.shields.io/github/last-commit/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/commits/main)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/releases)
+[![Codecov](https://codecov.io/gh/SakuraPuare/github-stats-analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/SakuraPuare/github-stats-analyzer)
+[![Documentation Status](https://readthedocs.org/projects/github-stats-analyzer/badge/?version=latest)](https://github-stats-analyzer.readthedocs.io/en/latest/?badge=latest)
+[![wakatime](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632.svg)](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632)
 
 *Read this in [中文 (Chinese)](README_CN.md).*
 
@@ -25,6 +35,7 @@ View the latest analysis results in the [stats branch](https://github.com/Sakura
 - **Comprehensive Analysis**: Collects detailed statistics on code contributions
 - **Language Breakdown**: Shows distribution of code across programming languages
 - **Smart Fork Analysis**: Analyzes all repositories including forks, but only counts user's own contributions
+- **Accurate Line Counting**: Precisely measures actual code lines by analyzing commit data directly from GitHub's API
 - **Parallel Processing**: Efficiently processes multiple repositories concurrently
 - **Rich Output**: Beautiful console output with tables and colors
 - **Detailed Logging**: Comprehensive logging for debugging
@@ -192,8 +203,8 @@ The program will display:
 ## 📝 Notes
 
 - The program analyzes all repositories including forks, but only counts the user's own contributions
+- **Highly Accurate Line Counting**: Unlike other tools that estimate based on file size, our analyzer precisely counts actual code lines by analyzing commit data
 - GitHub API has rate limits, so analyzing users with many repositories might take time
-- Lines of code are estimated based on byte count (approximation)
 - Some languages are excluded by default to avoid skewing statistics (use `--include-all` to include them)
 - Log files are stored in the `logs` directory
 - Basic access mode is suitable for quick analysis of public repositories

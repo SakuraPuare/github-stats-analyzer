@@ -33,6 +33,15 @@ class Repository:
     owner_login: str = ""
 
 @dataclass
+class CommitFile:
+    """GitHub commit file information"""
+    filename: str
+    additions: int = 0
+    deletions: int = 0
+    changes: int = 0
+    status: str = ""
+
+@dataclass
 class Commit:
     """GitHub commit information"""
     sha: str
@@ -46,6 +55,7 @@ class Commit:
     total: int = 0
     url: str = ""
     html_url: str = ""
+    files: List[CommitFile] = field(default_factory=list)
 
 @dataclass
 class LanguageStats:
@@ -63,6 +73,9 @@ class RepoStats:
     additions: int = 0
     deletions: int = 0
     total_lines: int = 0
+    code_additions: int = 0
+    code_deletions: int = 0
+    code_net_change: int = 0
     languages: Dict[str, int] = field(default_factory=dict)
     commit_count: int = 0
     is_fork: bool = False

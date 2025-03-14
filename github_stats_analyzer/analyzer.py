@@ -58,23 +58,26 @@ class GitHubStatsAnalyzer:
         self.username = username
         self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
         self.access_level = access_level
+        self.max_repos = max_repos or REPO_LIMITS.get(access_level, 100)
+        self.max_commits = max_commits or COMMIT_LIMITS.get(access_level, 100)
         self.output_format = output_format
         
-        # Override default limits if specified
-        self.max_repos = max_repos or REPO_LIMITS[access_level]
-        self.max_commits = max_commits or COMMIT_LIMITS[access_level]
-        
-        # Initialize API client
-        self.api_client = GitHubAPIClient(access_level)
-        
         # Initialize statistics
+        self.repo_stats: List[RepoStats] = []
+        self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
         self.total_lines = 0
-        self.language_stats: Dict[str, int] = {}
-        self.repo_stats: List[RepoStats] = []
         
-        # Console for rich output
+        # Initialize code statistics (excluding non-code files)
+        self.code_additions = 0
+        self.code_deletions = 0
+        self.code_net_change = 0
+        
+        # Initialize API client
+        self.api_client = GitHubAPIClient(access_level=access_level)
+        
+        # Initialize console for rich output
         self.console = Console()
     
     async def analyze(self):
@@ -210,14 +213,29 @@ class GitHubStatsAnalyzer:
                 repo_stats.deletions += commit_detail.deletions
                 repo_stats.total_lines += commit_detail.additions + commit_detail.deletions
                 
+                # Update code statistics by checking file extensions
+                for file in commit_detail.files:
+                    if is_code_file(file.filename):
+                        repo_stats.code_additions += file.additions
+                        repo_stats.code_deletions += file.deletions
+                
                 # Update global statistics
                 self.total_additions += commit_detail.additions
                 self.total_deletions += commit_detail.deletions
                 self.total_lines += commit_detail.additions + commit_detail.deletions
+                
+                # Update global code statistics
+                for file in commit_detail.files:
+                    if is_code_file(file.filename):
+                        self.code_additions += file.additions
+                        self.code_deletions += file.deletions
             except Exception as e:
                 logger.error(f"Error getting commit details for {commit.sha}: {e}")
                 # Continue with next commit
                 continue
+        
+        # Calculate net code change
+        repo_stats.code_net_change = repo_stats.code_additions - repo_stats.code_deletions
     
     async def get_repo_languages(self, repo: Repository, repo_stats: RepoStats):
         """Get language statistics for a repository.
@@ -250,10 +268,14 @@ class GitHubStatsAnalyzer:
         total_bytes = sum(self.language_stats.values())
         
         # Calculate percentages
-        if total_bytes > 0:
-            for language, bytes_count in self.language_stats.items():
-                percentage = (bytes_count / total_bytes) * 100
-                logger.debug(f"Language {language}: {bytes_count} bytes, {percentage:.2f}%")
+        for language, bytes_count in self.language_stats.items():
+            percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
+            logger.debug(f"Language {language}: {bytes_count} bytes, {percentage:.2f}%")
+        
+        # Calculate code net change
+        self.code_net_change = self.code_additions - self.code_deletions
+        
+        logger.info("Language percentages calculated")
     
     def print_results(self):
         """Print analysis results."""
@@ -272,64 +294,123 @@ class GitHubStatsAnalyzer:
     def _print_text_results(self):
         """Print results in text format."""
         # Print header
-        self.console.print(f"\n[bold cyan]GitHub Statistics for [bold yellow]{self.username}[/bold yellow][/bold cyan]\n")
+        self.console.print(f"\n[bold cyan]GitHub Statistics for: [bold yellow]{self.username}[/bold yellow][/bold cyan]\n")
         
-        # Print summary
-        self.console.print("[bold green]Summary:[/bold green]")
-        self.console.print(f"Total repositories analyzed: [bold]{len(self.repo_stats)}[/bold]")
-        self.console.print(f"Total additions: [bold green]+{self.total_additions:,}[/bold green]")
-        self.console.print(f"Total deletions: [bold red]-{self.total_deletions:,}[/bold red]")
-        self.console.print(f"Total lines changed: [bold]{self.total_lines:,}[/bold]")
+        # Print summary statistics
+        self.console.print("[bold magenta]Summary Statistics[/bold magenta]")
+        
+        # Create summary table
+        summary_table = Table(show_header=True, header_style="bold")
+        summary_table.add_column("Category", style="cyan")
+        summary_table.add_column("Additions", style="green", justify="right")
+        summary_table.add_column("Deletions", style="red", justify="right")
+        summary_table.add_column("Net Change", style="yellow", justify="right")
+        
+        # Add rows to summary table
+        summary_table.add_row(
+            "Total Changes (All Files)",
+            f"{self.total_additions:,}",
+            f"{self.total_deletions:,}",
+            f"{self.total_additions - self.total_deletions:,}"
+        )
+        
+        summary_table.add_row(
+            "Code Changes (Code Files Only)",
+            f"{self.code_additions:,}",
+            f"{self.code_deletions:,}",
+            f"{self.code_additions - self.code_deletions:,}"
+        )
+        
+        # Calculate filtered code changes (excluding certain file types)
+        filtered_additions = self.code_additions
+        filtered_deletions = self.code_deletions
+        filtered_net = filtered_additions - filtered_deletions
+        
+        excluded_types = "CSS, CSV, HTML, JSON, Jupyter Notebook, Markdown, Mathematica, SVG, TSV, Text, XML, YAML, reStructuredText"
+        
+        summary_table.add_row(
+            f"Filtered Code Changes\n(excluding {excluded_types})",
+            f"{filtered_additions:,}",
+            f"{filtered_deletions:,}",
+            f"{filtered_net:,}"
+        )
+        
+        # Print summary table
+        self.console.print(summary_table)
         
         # Print language breakdown
-        self.console.print("\n[bold green]Language Breakdown:[/bold green]")
+        self.console.print("\n[bold magenta]Language Statistics (sorted by lines of code)[/bold magenta]")
         
-        # Create table
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("Language", style="cyan")
-        table.add_column("Lines", style="green", justify="right")
-        table.add_column("Percentage", style="yellow", justify="right")
+        # Create language table
+        language_table = Table(show_header=True, header_style="bold")
+        language_table.add_column("Language", style="cyan")
+        language_table.add_column("Bytes", style="green", justify="right")
+        language_table.add_column("Percentage", style="yellow", justify="right")
+        language_table.add_column("Est. Lines", style="blue", justify="right")
         
         # Sort languages by bytes
         sorted_languages = sorted(self.language_stats.items(), key=lambda x: x[1], reverse=True)
         total_bytes = sum(self.language_stats.values())
         
-        # Add rows
+        # Add rows to language table
         for language, bytes_count in sorted_languages:
             percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
-            table.add_row(
-                language,
-                f"{bytes_count:,}",
-                f"{percentage:.2f}%"
-            )
+            # Estimate lines of code (rough approximation)
+            est_lines = int(bytes_count / 30)  # Assuming average of 30 bytes per line
+            
+            # Mark excluded languages
+            if language in self.excluded_languages:
+                language_table.add_row(
+                    f"{language} (excluded)",
+                    f"{bytes_count:,}",
+                    f"{percentage:.1f}%",
+                    f"{est_lines:,}"
+                )
+            else:
+                language_table.add_row(
+                    language,
+                    f"{bytes_count:,}",
+                    f"{percentage:.1f}%",
+                    f"{est_lines:,}"
+                )
         
-        # Print table
-        self.console.print(table)
+        # Print language table
+        self.console.print(language_table)
         
         # Print repositories
         if self.access_level == AccessLevel.FULL:
-            self.console.print("\n[bold green]Repositories:[/bold green]")
+            self.console.print("\n[bold magenta]Detailed Repository Statistics (sorted by code net change)[/bold magenta]")
             
-            # Create table
-            table = Table(show_header=True, header_style="bold")
-            table.add_column("Repository", style="cyan")
-            table.add_column("Stars", style="yellow", justify="right")
-            table.add_column("Created", style="green", justify="right")
+            # Create repository table
+            repo_table = Table(show_header=True, header_style="bold")
+            repo_table.add_column("Repository", style="cyan")
+            repo_table.add_column("Total +/-", style="yellow", justify="right")
+            repo_table.add_column("Code +/-", style="green", justify="right")
+            repo_table.add_column("Stars", style="magenta", justify="right")
+            repo_table.add_column("Created", style="blue", justify="right")
+            repo_table.add_column("Languages", style="cyan")
             
-            # Sort repositories by stars
-            sorted_repos = sorted(self.repo_stats, key=lambda x: x.stars, reverse=True)
+            # Sort repositories by code net change
+            sorted_repos = sorted(self.repo_stats, key=lambda x: (x.code_additions - x.code_deletions), reverse=True)
             
-            # Add rows
+            # Add rows to repository table
             for repo in sorted_repos:
                 created_at = format_datetime(repo.created_at) if repo.created_at else "Unknown"
-                table.add_row(
+                
+                # Format language list
+                languages = ", ".join(repo.languages.keys())
+                
+                repo_table.add_row(
                     repo.name,
+                    f"+{repo.additions:,}/-{repo.deletions:,}",
+                    f"+{repo.code_additions:,}/-{repo.code_deletions:,}",
                     f"{repo.stars:,}",
-                    created_at
+                    created_at,
+                    languages
                 )
             
-            # Print table
-            self.console.print(table)
+            # Print repository table
+            self.console.print(repo_table)
     
     def _print_json_results(self):
         """Print results in JSON format."""
@@ -337,10 +418,13 @@ class GitHubStatsAnalyzer:
         result = {
             "username": self.username,
             "summary": {
-                "repositories_count": len(self.repo_stats),
+                "total_repositories": len(self.repo_stats),
                 "total_additions": self.total_additions,
                 "total_deletions": self.total_deletions,
-                "total_lines_changed": self.total_lines
+                "total_lines": self.total_lines,
+                "code_additions": self.code_additions,
+                "code_deletions": self.code_deletions,
+                "code_net_change": self.code_net_change
             },
             "languages": {},
             "repositories": []
@@ -350,9 +434,12 @@ class GitHubStatsAnalyzer:
         total_bytes = sum(self.language_stats.values())
         for language, bytes_count in self.language_stats.items():
             percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
+            est_lines = int(bytes_count / 30)  # Assuming average of 30 bytes per line
             result["languages"][language] = {
                 "bytes": bytes_count,
-                "percentage": round(percentage, 2)
+                "percentage": round(percentage, 2),
+                "estimated_lines": est_lines,
+                "excluded": language in self.excluded_languages
             }
         
         # Add repository statistics
@@ -360,13 +447,16 @@ class GitHubStatsAnalyzer:
             repo_data = {
                 "name": repo.name,
                 "full_name": repo.full_name,
-                "is_fork": repo.is_fork,
-                "stars": repo.stars,
-                "created_at": format_datetime(repo.created_at) if repo.created_at else None,
                 "additions": repo.additions,
                 "deletions": repo.deletions,
                 "total_lines": repo.total_lines,
+                "code_additions": repo.code_additions,
+                "code_deletions": repo.code_deletions,
+                "code_net_change": repo.code_net_change,
                 "commit_count": repo.commit_count,
+                "is_fork": repo.is_fork,
+                "stars": repo.stars,
+                "created_at": repo.created_at.isoformat() if repo.created_at else None,
                 "languages": repo.languages
             }
             result["repositories"].append(repo_data)
@@ -376,44 +466,64 @@ class GitHubStatsAnalyzer:
     
     def _print_csv_results(self):
         """Print results in CSV format."""
-        # Print summary
+        # Create CSV writer
         writer = csv.writer(sys.stdout)
-        writer.writerow(["GitHub Statistics for", self.username])
-        writer.writerow([])
-        writer.writerow(["Summary"])
-        writer.writerow(["Total repositories", len(self.repo_stats)])
-        writer.writerow(["Total additions", self.total_additions])
-        writer.writerow(["Total deletions", self.total_deletions])
-        writer.writerow(["Total lines changed", self.total_lines])
+        
+        # Write summary
+        writer.writerow(["GitHub Statistics for:", self.username])
         writer.writerow([])
         
-        # Print language breakdown
-        writer.writerow(["Language Breakdown"])
-        writer.writerow(["Language", "Bytes", "Percentage"])
+        # Write summary statistics
+        writer.writerow(["Summary Statistics"])
+        writer.writerow(["Category", "Additions", "Deletions", "Net Change"])
+        writer.writerow(["Total Changes (All Files)", self.total_additions, self.total_deletions, self.total_additions - self.total_deletions])
+        writer.writerow(["Code Changes (Code Files Only)", self.code_additions, self.code_deletions, self.code_additions - self.code_deletions])
+        
+        excluded_types = "CSS, CSV, HTML, JSON, Jupyter Notebook, Markdown, Mathematica, SVG, TSV, Text, XML, YAML, reStructuredText"
+        writer.writerow([f"Filtered Code Changes (excluding {excluded_types})", self.code_additions, self.code_deletions, self.code_additions - self.code_deletions])
+        writer.writerow([])
+        
+        # Write language statistics
+        writer.writerow(["Language Statistics (sorted by bytes)"])
+        writer.writerow(["Language", "Bytes", "Percentage", "Est. Lines"])
         
         # Sort languages by bytes
         sorted_languages = sorted(self.language_stats.items(), key=lambda x: x[1], reverse=True)
         total_bytes = sum(self.language_stats.values())
         
-        # Add rows
+        # Write language rows
         for language, bytes_count in sorted_languages:
             percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
-            writer.writerow([language, bytes_count, f"{percentage:.2f}%"])
+            est_lines = int(bytes_count / 30)  # Assuming average of 30 bytes per line
+            
+            if language in self.excluded_languages:
+                writer.writerow([f"{language} (excluded)", bytes_count, f"{percentage:.1f}%", est_lines])
+            else:
+                writer.writerow([language, bytes_count, f"{percentage:.1f}%", est_lines])
         
         writer.writerow([])
         
-        # Print repositories
+        # Write repository statistics
         if self.access_level == AccessLevel.FULL:
-            writer.writerow(["Repositories"])
-            writer.writerow(["Repository", "Stars", "Created"])
+            writer.writerow(["Detailed Repository Statistics (sorted by code net change)"])
+            writer.writerow(["Repository", "Total +/-", "Code +/-", "Stars", "Created", "Languages"])
             
-            # Sort repositories by stars
-            sorted_repos = sorted(self.repo_stats, key=lambda x: x.stars, reverse=True)
+            # Sort repositories by code net change
+            sorted_repos = sorted(self.repo_stats, key=lambda x: (x.code_additions - x.code_deletions), reverse=True)
             
-            # Add rows
+            # Write repository rows
             for repo in sorted_repos:
                 created_at = format_datetime(repo.created_at) if repo.created_at else "Unknown"
-                writer.writerow([repo.name, repo.stars, created_at])
+                languages = ", ".join(repo.languages.keys())
+                
+                writer.writerow([
+                    repo.name,
+                    f"+{repo.additions}/-{repo.deletions}",
+                    f"+{repo.code_additions}/-{repo.code_deletions}",
+                    repo.stars,
+                    created_at,
+                    languages
+                ])
     
     async def close(self):
         """Close the API client."""

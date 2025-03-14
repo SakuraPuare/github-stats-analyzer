@@ -5,6 +5,16 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![PyPI version](https://badge.fury.io/py/github-stats-analyzer.svg)](https://badge.fury.io/py/github-stats-analyzer)
 [![PyPI downloads](https://img.shields.io/pypi/dm/github-stats-analyzer.svg)](https://pypi.org/project/github-stats-analyzer/)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/SakuraPuare/github-stats-analyzer/test.yml?branch=main&label=tests)](https://github.com/SakuraPuare/github-stats-analyzer/actions/workflows/test.yml)
+[![GitHub stars](https://img.shields.io/github/stars/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/pulls)
+[![GitHub last commit](https://img.shields.io/github/last-commit/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/commits/main)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/releases)
+[![Codecov](https://codecov.io/gh/SakuraPuare/github-stats-analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/SakuraPuare/github-stats-analyzer)
+[![Documentation Status](https://readthedocs.org/projects/github-stats-analyzer/badge/?version=latest)](https://github-stats-analyzer.readthedocs.io/en/latest/?badge=latest)
+[![wakatime](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632.svg)](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632)
 
 *Read this in [English](README.md).*
 
@@ -26,6 +36,7 @@
 - **全面分析**：收集代码贡献的详细统计数据
 - **语言细分**：显示代码在各编程语言中的分布
 - **智能Fork分析**：分析所有仓库包括fork的仓库，但只统计用户自己的贡献
+- **精确代码行统计**：通过直接分析GitHub API的提交数据，精确测量实际代码行数
 - **并行处理**：高效地并发处理多个仓库
 - **丰富输出**：美观的控制台输出，带有表格和颜色
 - **详细日志**：用于调试的全面日志记录
@@ -193,8 +204,8 @@ asyncio.run(analyze_user("octocat", AccessLevel.FULL))
 ## 📝 注意事项
 
 - 程序分析所有仓库包括 fork 的仓库，但只统计用户自己的贡献
+- **高精度代码行统计**：与其他基于文件大小进行估算的工具不同，我们的分析器通过分析提交数据精确计算实际代码行数
 - GitHub API 有速率限制，因此分析拥有许多仓库的用户可能需要一些时间
-- 代码行数是基于字节数的估计（近似值）
 - 默认情况下排除某些语言以避免统计偏差（使用 `--include-all` 选项可包含所有语言）
 - 日志文件存储在 `logs` 目录中
 - 基础访问模式适合快速分析公开仓库
