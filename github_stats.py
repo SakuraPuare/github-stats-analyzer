@@ -108,6 +108,9 @@ class RepoStats(NamedTuple):
     additions: int
     deletions: int
     net_change: int
+    code_additions: int  # Additions in code files only
+    code_deletions: int  # Deletions in code files only
+    code_net_change: int  # Net change in code files only
     languages: Dict[str, int]
     stars: int
     created_at: str
@@ -121,6 +124,8 @@ class GitHubStatsAnalyzer:
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
+        self.code_additions = 0  # Additions in code files only
+        self.code_deletions = 0  # Deletions in code files only
         self.filtered_additions = 0  # Additions excluding certain languages
         self.filtered_deletions = 0  # Deletions excluding certain languages
         self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)  # Limit concurrent repository processing
@@ -129,6 +134,16 @@ class GitHubStatsAnalyzer:
         self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
         self.repo_language_stats: Dict[str, Dict[str, int]] = {}  # Track language stats per repo
         self.repo_stats: Dict[str, RepoStats] = {}  # Detailed stats for each repo
+        
+        # Define file extensions to exclude (non-code files)
+        self.non_code_extensions = {
+            '.csv', '.json', '.yaml', '.yml', '.md', '.txt', '.log', '.data',
+            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.doc', '.docx',
+            '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz', '.rar',
+            '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac', '.ogg',
+            '.ttf', '.woff', '.woff2', '.eot', '.otf',
+            '.min.js', '.min.css'  # Minified files
+        }
         
     async def close(self):
         await self.client.aclose()
@@ -249,6 +264,13 @@ class GitHubStatsAnalyzer:
         logger.info(f"Total non-forked repositories found: {len(all_repos)}")
         return all_repos
     
+    def is_code_file(self, filename: str) -> bool:
+        """Check if a file is a code file based on its extension."""
+        for ext in self.non_code_extensions:
+            if filename.lower().endswith(ext):
+                return False
+        return True
+
     async def get_repo_commits(self, repo: Dict[str, Any]) -> Tuple[int, int]:
         """Get additions and deletions by analyzing individual commits."""
         repo_name = repo["name"]
@@ -292,22 +314,41 @@ class GitHubStatsAnalyzer:
                     if status != 200 or not commit_data:
                         logger.warning(f"Failed to fetch details for commit {sha[:7]}: {status}")
                         continue
+                    
+                    # Get files changed in this commit
+                    files = commit_data.get("files", [])
+                    commit_code_additions = 0
+                    commit_code_deletions = 0
+                    commit_total_additions = 0
+                    commit_total_deletions = 0
+                    
+                    for file in files:
+                        filename = file.get("filename", "")
+                        file_additions = file.get("additions", 0)
+                        file_deletions = file.get("deletions", 0)
                         
-                    stats = commit_data.get("stats", {})
+                        # Track total changes for all files
+                        commit_total_additions += file_additions
+                        commit_total_deletions += file_deletions
+                        
+                        # Only count changes for code files
+                        if self.is_code_file(filename):
+                            commit_code_additions += file_additions
+                            commit_code_deletions += file_deletions
                     
-                    commit_additions = stats.get("additions", 0)
-                    commit_deletions = stats.get("deletions", 0)
-                    additions += commit_additions
-                    deletions += commit_deletions
+                    # Log both total and code-only changes
+                    logger.trace(f"Commit {sha[:7]}: Total: +{commit_total_additions}, -{commit_total_deletions} | Code only: +{commit_code_additions}, -{commit_code_deletions}")
                     
-                    logger.trace(f"Commit {sha[:7]}: +{commit_additions}, -{commit_deletions}")
+                    # Only add code changes to the total
+                    additions += commit_code_additions
+                    deletions += commit_code_deletions
                     
                 page += 1
                 
                 # Avoid rate limiting
                 await asyncio.sleep(0.1)
                 
-            logger.debug(f"Repository {repo_name} commit analysis complete: +{additions}, -{deletions}")
+            logger.debug(f"Repository {repo_name} commit analysis complete: +{additions}, -{deletions} (code files only)")
             return additions, deletions
             
         except Exception as e:
@@ -319,6 +360,24 @@ class GitHubStatsAnalyzer:
         repo_name = repo["name"]
         logger.debug(f"Fetching stats for repository: {repo_name}")
         
+        # First, get a list of all files in the repository to check which ones are code files
+        status, repo_contents = await self.github_request(
+            "get",
+            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/git/trees/HEAD?recursive=1"
+        )
+        
+        code_files = set()
+        if status == 200 and repo_contents and "tree" in repo_contents:
+            for item in repo_contents["tree"]:
+                if item.get("type") == "blob":  # It's a file
+                    path = item.get("path", "")
+                    if self.is_code_file(path):
+                        code_files.add(path)
+            logger.debug(f"Found {len(code_files)} code files in repository {repo_name}")
+        else:
+            logger.warning(f"Could not fetch file list for {repo_name}, will count all files as code files")
+        
+        # Now get the contributor stats
         status, stats = await self.github_request(
             "get",
             f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
@@ -334,14 +393,27 @@ class GitHubStatsAnalyzer:
         additions = 0
         deletions = 0
         
+        # If we couldn't get the file list, we'll need to use commit analysis
+        if not code_files and status == 200:
+            logger.info(f"No code files found in repository {repo_name}, falling back to commit analysis")
+            return await self.get_repo_commits(repo)
+        
         # Find the user's contributions
         user_found = False
         for contributor in stats:
             if contributor.get("author", {}).get("login", "").lower() == self.username.lower():
                 user_found = True
-                for week in contributor.get("weeks", []):
-                    additions += week.get("a", 0)
-                    deletions += week.get("d", 0)
+                
+                # If we have a list of code files, we need to check each commit
+                if code_files:
+                    # We need to analyze commits individually to filter by file type
+                    logger.info(f"Using commit analysis for {repo_name} to filter by file type")
+                    return await self.get_repo_commits(repo)
+                else:
+                    # If we couldn't get the file list, just use the contributor stats
+                    for week in contributor.get("weeks", []):
+                        additions += week.get("a", 0)
+                        deletions += week.get("d", 0)
                 break
         
         # If user not found in contributors, fall back to commit analysis
@@ -369,7 +441,7 @@ class GitHubStatsAnalyzer:
         logger.debug(f"Repository {repo_name} languages: {list(languages.keys())}")
         return languages
     
-    async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, Dict[str, int]]:
+    async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, int, int, Dict[str, int]]:
         """Process a single repository to get stats and languages.
         
         This method processes each repository sequentially (stats then languages),
@@ -381,8 +453,11 @@ class GitHubStatsAnalyzer:
             logger.info(f"Processing repository: {repo_name}")
                 
             # Process repository sequentially (stats then languages)
-            additions, deletions = await self.get_repo_stats(repo)
+            code_additions, code_deletions = await self.get_repo_stats(repo)
             languages = await self.get_repo_languages(repo)
+            
+            # Get total additions and deletions (including non-code files)
+            total_additions, total_deletions = await self.get_total_changes(repo)
             
             # Store language stats for this repo
             self.repo_language_stats[repo_name] = languages
@@ -393,18 +468,49 @@ class GitHubStatsAnalyzer:
             
             self.repo_stats[repo_name] = RepoStats(
                 name=repo_name,
-                additions=additions,
-                deletions=deletions,
-                net_change=additions - deletions,
+                additions=total_additions,
+                deletions=total_deletions,
+                net_change=total_additions - total_deletions,
+                code_additions=code_additions,
+                code_deletions=code_deletions,
+                code_net_change=code_additions - code_deletions,
                 languages=languages,
                 stars=repo["stargazers_count"],
                 created_at=created_at,
                 excluded=is_excluded
             )
             
-            logger.info(f"Repository {repo_name} complete: +{additions}, -{deletions}, languages: {list(languages.keys())}")
+            logger.info(f"Repository {repo_name} complete: Total: +{total_additions}, -{total_deletions} | Code only: +{code_additions}, -{code_deletions}, languages: {list(languages.keys())}")
                 
-            return additions, deletions, languages
+            return total_additions, total_deletions, code_additions, code_deletions, languages
+    
+    async def get_total_changes(self, repo: Dict[str, Any]) -> Tuple[int, int]:
+        """Get total additions and deletions for a repository (including non-code files)."""
+        repo_name = repo["name"]
+        logger.debug(f"Fetching total changes for repository: {repo_name}")
+        
+        status, stats = await self.github_request(
+            "get",
+            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
+        )
+        
+        if status != 200 or not stats:
+            logger.warning(f"Error fetching total stats for {repo_name}: {status}")
+            return 0, 0
+            
+        additions = 0
+        deletions = 0
+        
+        # Find the user's contributions
+        for contributor in stats:
+            if contributor.get("author", {}).get("login", "").lower() == self.username.lower():
+                for week in contributor.get("weeks", []):
+                    additions += week.get("a", 0)
+                    deletions += week.get("d", 0)
+                break
+                
+        logger.debug(f"Repository {repo_name} total stats: +{additions}, -{deletions}")
+        return additions, deletions
     
     def should_exclude_repo(self, repo_name: str, languages: Optional[Dict[str, int]] = None) -> bool:
         """Determine if a repository should be excluded from filtered stats based on its languages."""
@@ -471,17 +577,19 @@ class GitHubStatsAnalyzer:
                     logger.error(f"Error processing repository {repo_name}: {str(result)}")
                     continue
                     
-                additions, deletions, languages = result
+                total_additions, total_deletions, code_additions, code_deletions, languages = result
                 repo_name = self.repos[i]["name"]
                 
                 # Update total stats
-                self.total_additions += additions
-                self.total_deletions += deletions
+                self.total_additions += total_additions
+                self.total_deletions += total_deletions
+                self.code_additions += code_additions
+                self.code_deletions += code_deletions
                 
                 # Update filtered stats (excluding certain languages)
                 if not self.should_exclude_repo(repo_name):
-                    self.filtered_additions += additions
-                    self.filtered_deletions += deletions
+                    self.filtered_additions += code_additions
+                    self.filtered_deletions += code_deletions
                 
                 # Update language statistics
                 for language, bytes_count in languages.items():
@@ -497,13 +605,20 @@ class GitHubStatsAnalyzer:
         print(f"GitHub Statistics for: {self.username}")
         print("="*50)
         
-        print(f"\nTotal Additions: {self.total_additions:,}")
-        print(f"Total Deletions: {self.total_deletions:,}")
-        print(f"Net Change: {self.total_additions - self.total_deletions:,}")
+        print("\nTotal Changes (All Files):")
+        print(f"  Additions: {self.total_additions:,}")
+        print(f"  Deletions: {self.total_deletions:,}")
+        print(f"  Net Change: {self.total_additions - self.total_deletions:,}")
         
-        print(f"\nFiltered Additions (excluding {', '.join(sorted(self.excluded_languages))}): {self.filtered_additions:,}")
-        print(f"Filtered Deletions (excluding {', '.join(sorted(self.excluded_languages))}): {self.filtered_deletions:,}")
-        print(f"Filtered Net Change: {self.filtered_additions - self.filtered_deletions:,}")
+        print("\nCode Changes (Code Files Only):")
+        print(f"  Additions: {self.code_additions:,}")
+        print(f"  Deletions: {self.code_deletions:,}")
+        print(f"  Net Change: {self.code_additions - self.code_deletions:,}")
+        
+        print(f"\nFiltered Code Changes (excluding {', '.join(sorted(self.excluded_languages))}):")
+        print(f"  Additions: {self.filtered_additions:,}")
+        print(f"  Deletions: {self.filtered_deletions:,}")
+        print(f"  Net Change: {self.filtered_additions - self.filtered_deletions:,}")
         
         if self.failed_repos:
             print(f"\nNote: Could not fetch complete stats for {len(self.failed_repos)} repositories.")
@@ -533,15 +648,15 @@ class GitHubStatsAnalyzer:
             print(f"{language:<15}{excluded_mark}: {bytes_count:,} bytes ({percentage:.1f}%) ≈ {lines_estimate:,} lines")
         
         # Print detailed repository statistics
-        print("\nDetailed Repository Statistics (sorted by net change):")
-        print("-"*100)
-        print(f"{'Repository':<30} | {'Additions':>10} | {'Deletions':>10} | {'Net Change':>10} | {'Stars':>5} | {'Created':>10} | {'Languages':<20}")
-        print("-"*100)
+        print("\nDetailed Repository Statistics (sorted by code net change):")
+        print("-"*120)
+        print(f"{'Repository':<25} | {'Total +/-':<20} | {'Code +/-':<20} | {'Stars':>5} | {'Created':>10} | {'Languages':<20}")
+        print("-"*120)
         
-        # Sort repositories by net change
+        # Sort repositories by code net change
         sorted_repos = sorted(
             self.repo_stats.values(),
-            key=lambda x: x.net_change,
+            key=lambda x: x.code_net_change,
             reverse=True
         )
         
@@ -553,7 +668,7 @@ class GitHubStatsAnalyzer:
                 top_languages = [lang for lang, _ in sorted_repo_langs[:3]]
             
             excluded_mark = " *" if repo.excluded else ""
-            print(f"{repo.name:<28}{excluded_mark} | {repo.additions:>10,} | {repo.deletions:>10,} | {repo.net_change:>10,} | {repo.stars:>5} | {repo.created_at:>10} | {', '.join(top_languages):<20}")
+            print(f"{repo.name:<23}{excluded_mark} | +{repo.additions:>8,}/-{repo.deletions:<8,} | +{repo.code_additions:>8,}/-{repo.code_deletions:<8,} | {repo.stars:>5} | {repo.created_at:>10} | {', '.join(top_languages):<20}")
         
         if any(repo.excluded for repo in self.repo_stats.values()):
             print("\n* Repositories excluded from filtered statistics due to high percentage of excluded languages")
