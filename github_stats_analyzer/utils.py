@@ -3,7 +3,7 @@
 Utility functions for GitHub User Statistics Analyzer
 """
 
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Union
 from datetime import datetime
 
 from github_stats_analyzer.config import NON_CODE_EXTENSIONS
@@ -53,7 +53,7 @@ def should_exclude_repo(repo_name: str, languages: Dict[str, int], excluded_lang
         
     return False
 
-def format_datetime(dt: Optional[datetime | str], output_format: str = "%Y-%m-%d") -> str:
+def format_datetime(dt: Optional[Union[datetime, str]], output_format: str = "%Y-%m-%d") -> str:
     """Format a datetime object or string to a string.
     
     Args:
