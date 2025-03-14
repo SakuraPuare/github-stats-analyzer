@@ -38,7 +38,7 @@ jobs:
         echo "```" >> results/RESULT.md
         
         # 运行分析器并将输出重定向到文件
-        github-stats ${{ github.repository_owner }} --access-level full >> results/RESULT.md
+        python -m github_stats_analyzer.main ${{ github.repository_owner }} --access-level full >> results/RESULT.md
 
         echo "```" >> results/RESULT.md
         
