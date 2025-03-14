@@ -19,7 +19,7 @@ import sys
 import json
 import asyncio
 import time
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple, Any, Optional, Union, Set
 from datetime import datetime
 import io
 
@@ -44,6 +44,23 @@ MAX_CONCURRENT_REPOS = 5  # Maximum number of repositories to process concurrent
 DEBUG = False  # Set to True to enable debug output
 MAX_RETRIES = 3  # Maximum number of retries for HTTP requests
 RETRY_DELAY = 1.0  # Initial delay between retries (seconds)
+
+# Languages to exclude from line count statistics (can cause data skew)
+EXCLUDED_LANGUAGES = {
+    "Mathematica",       # Contains a lot of output and markdown
+    "Jupyter Notebook",  # Contains a lot of output and markdown
+    "HTML",              # Often generated or contains a lot of boilerplate
+    "CSS",               # Often minified or generated
+    "JSON",              # Data files, not code
+    "YAML",              # Configuration files
+    "Markdown",          # Documentation
+    "Text",              # Plain text files
+    "XML",               # Data files
+    "CSV",               # Data files
+    "TSV",               # Data files
+    "reStructuredText",  # Documentation
+    "SVG",               # Vector graphics
+}
 
 # Custom sink for loguru that uses tqdm.write to avoid breaking progress bars
 def tqdm_sink(message):
@@ -86,16 +103,20 @@ class TqdmProgressBar:
         self.close()
 
 class GitHubStatsAnalyzer:
-    def __init__(self, username: str):
+    def __init__(self, username: str, excluded_languages: Optional[Set[str]] = None):
         self.username = username
         self.client = httpx.AsyncClient(headers=HEADERS, timeout=60.0)  # Increased timeout
         self.repos: List[Dict[str, Any]] = []
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
+        self.filtered_additions = 0  # Additions excluding certain languages
+        self.filtered_deletions = 0  # Deletions excluding certain languages
         self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)  # Limit concurrent repository processing
         self.failed_repos = []  # Track repos that failed to fetch stats
         self.request_count = 0  # Track number of API requests
+        self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
+        self.repo_language_stats: Dict[str, Dict[str, int]] = {}  # Track language stats per repo
         
     async def close(self):
         await self.client.aclose()
@@ -351,9 +372,36 @@ class GitHubStatsAnalyzer:
             additions, deletions = await self.get_repo_stats(repo)
             languages = await self.get_repo_languages(repo)
             
+            # Store language stats for this repo
+            self.repo_language_stats[repo_name] = languages
+            
             logger.info(f"Repository {repo_name} complete: +{additions}, -{deletions}, languages: {list(languages.keys())}")
                 
             return additions, deletions, languages
+    
+    def should_exclude_repo(self, repo_name: str) -> bool:
+        """Determine if a repository should be excluded from filtered stats based on its languages."""
+        if repo_name not in self.repo_language_stats:
+            return False
+            
+        languages = self.repo_language_stats[repo_name]
+        if not languages:
+            return False
+            
+        # Calculate total bytes
+        total_bytes = sum(languages.values())
+        
+        # Check if excluded languages make up more than 50% of the repo
+        excluded_bytes = sum(bytes_count for lang, bytes_count in languages.items() 
+                            if lang in self.excluded_languages)
+        
+        excluded_percentage = (excluded_bytes / total_bytes) * 100 if total_bytes > 0 else 0
+        
+        if excluded_percentage > 50:
+            logger.info(f"Repository {repo_name} excluded from filtered stats (excluded languages: {excluded_percentage:.1f}%)")
+            return True
+            
+        return False
     
     async def analyze(self):
         """Analyze all repositories for the user."""
@@ -396,8 +444,16 @@ class GitHubStatsAnalyzer:
                     continue
                     
                 additions, deletions, languages = result
+                repo_name = self.repos[i]["name"]
+                
+                # Update total stats
                 self.total_additions += additions
                 self.total_deletions += deletions
+                
+                # Update filtered stats (excluding certain languages)
+                if not self.should_exclude_repo(repo_name):
+                    self.filtered_additions += additions
+                    self.filtered_deletions += deletions
                 
                 # Update language statistics
                 for language, bytes_count in languages.items():
@@ -416,6 +472,10 @@ class GitHubStatsAnalyzer:
         print(f"\nTotal Additions: {self.total_additions:,}")
         print(f"Total Deletions: {self.total_deletions:,}")
         print(f"Net Change: {self.total_additions - self.total_deletions:,}")
+        
+        print(f"\nFiltered Additions (excluding {', '.join(sorted(self.excluded_languages))}): {self.filtered_additions:,}")
+        print(f"Filtered Deletions (excluding {', '.join(sorted(self.excluded_languages))}): {self.filtered_deletions:,}")
+        print(f"Filtered Net Change: {self.filtered_additions - self.filtered_deletions:,}")
         
         if self.failed_repos:
             print(f"\nNote: Could not fetch complete stats for {len(self.failed_repos)} repositories.")
@@ -439,20 +499,27 @@ class GitHubStatsAnalyzer:
             # Approximate lines of code (very rough estimate)
             lines_estimate = bytes_count // 30
             percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
-            print(f"{language:<15}: {bytes_count:,} bytes ({percentage:.1f}%) ≈ {lines_estimate:,} lines")
+            
+            # Mark excluded languages
+            excluded_mark = " (excluded)" if language in self.excluded_languages else ""
+            print(f"{language:<15}{excluded_mark}: {bytes_count:,} bytes ({percentage:.1f}%) ≈ {lines_estimate:,} lines")
             
         print("\nRepository List:")
         print("-"*50)
         for repo in self.repos:
             created_at = datetime.strptime(repo["created_at"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d")
-            print(f"{repo['name']:<30} - Stars: {repo['stargazers_count']:<5} - Created: {created_at}")
+            excluded = "*" if self.should_exclude_repo(repo["name"]) else ""
+            print(f"{repo['name']:<30}{excluded} - Stars: {repo['stargazers_count']:<5} - Created: {created_at}")
+        
+        if any(self.should_exclude_repo(repo["name"]) for repo in self.repos):
+            print("\n* Repositories excluded from filtered statistics due to high percentage of excluded languages")
         
         print(f"\nTotal GitHub API Requests: {self.request_count}")
 
 async def main():
     if len(sys.argv) < 2:
         logger.error("Missing required username argument")
-        print("Usage: python github_stats.py <github_username> [--debug]")
+        print("Usage: python github_stats.py <github_username> [--debug] [--include-all]")
         sys.exit(1)
         
     if not GITHUB_TOKEN:
@@ -481,10 +548,19 @@ async def main():
             {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
              "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
         ])
+    
+    # Check for include-all flag
+    excluded_languages = set()
+    if "--include-all" in sys.argv:
+        logger.info("Including all languages in statistics")
+        sys.argv.remove("--include-all")
+    else:
+        excluded_languages = EXCLUDED_LANGUAGES
+        logger.info(f"Excluding languages from filtered statistics: {', '.join(sorted(excluded_languages))}")
         
     username = sys.argv[1]
     logger.info(f"Starting GitHub statistics analysis for user: {username}")
-    analyzer = GitHubStatsAnalyzer(username)
+    analyzer = GitHubStatsAnalyzer(username, excluded_languages)
     
     try:
         await analyzer.analyze()
