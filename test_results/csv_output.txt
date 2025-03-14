@@ -1,0 +1,12 @@
+GitHub Statistics for,octocat
+
+Summary
+Total repositories,2
+Total additions,751
+Total deletions,17
+Total lines changed,768
+
+Language Breakdown
+Language,Bytes,Percentage
+JavaScript,48,100.00%
+

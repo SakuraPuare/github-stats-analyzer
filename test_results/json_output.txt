@@ -1,0 +1,48 @@
+{
+  "username": "octocat",
+  "summary": {
+    "repositories_count": 2,
+    "total_additions": 751,
+    "total_deletions": 17,
+    "total_lines_changed": 768
+  },
+  "languages": {
+    "JavaScript": {
+      "bytes": 48,
+      "percentage": 100.0
+    }
+  },
+  "repositories": [
+    {
+      "name": "Spoon-Knife",
+      "full_name": "octocat/Spoon-Knife",
+      "is_fork": false,
+      "stars": 12881,
+      "created_at": "2011-01-27",
+      "additions": 47,
+      "deletions": 1,
+      "total_lines": 48,
+      "commit_count": 3,
+      "languages": {
+        "HTML": 355,
+        "CSS": 256
+      }
+    },
+    {
+      "name": "octocat.github.io",
+      "full_name": "octocat/octocat.github.io",
+      "is_fork": false,
+      "stars": 800,
+      "created_at": "2014-03-18",
+      "additions": 704,
+      "deletions": 16,
+      "total_lines": 720,
+      "commit_count": 4,
+      "languages": {
+        "CSS": 14694,
+        "HTML": 3983,
+        "JavaScript": 48
+      }
+    }
+  ]
+}
