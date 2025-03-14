@@ -21,6 +21,7 @@ import asyncio
 import time
 from typing import Dict, List, Tuple, Any, Optional, Union
 from datetime import datetime
+import io
 
 import httpx
 from tqdm import tqdm
@@ -44,10 +45,45 @@ DEBUG = False  # Set to True to enable debug output
 MAX_RETRIES = 3  # Maximum number of retries for HTTP requests
 RETRY_DELAY = 1.0  # Initial delay between retries (seconds)
 
+# Custom sink for loguru that uses tqdm.write to avoid breaking progress bars
+def tqdm_sink(message):
+    tqdm.write(message, end="")
+
 # Configure loguru logger
 logger.remove()  # Remove default handler
-logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
-logger.add("github_stats_{time}.log", rotation="10 MB", level="DEBUG", format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+
+# Add file handler (not affected by tqdm)
+logger.add(
+    "github_stats_{time}.log", 
+    rotation="10 MB", 
+    level="DEBUG", 
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+)
+
+# Add console handler using tqdm.write
+logger.add(
+    tqdm_sink,
+    colorize=True,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+)
+
+class TqdmProgressBar:
+    """Custom progress bar class that integrates with loguru."""
+    
+    def __init__(self, total, desc):
+        self.pbar = tqdm(total=total, desc=desc)
+        
+    def update(self, n=1):
+        self.pbar.update(n)
+        
+    def close(self):
+        self.pbar.close()
+        
+    def __enter__(self):
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 class GitHubStatsAnalyzer:
     def __init__(self, username: str):
@@ -338,7 +374,7 @@ class GitHubStatsAnalyzer:
             tasks.append(self.process_repo(repo))
         
         # Process repositories in parallel with progress bar
-        with tqdm(total=len(tasks), desc="Analyzing repositories") as progress_bar:
+        with TqdmProgressBar(total=len(tasks), desc="Analyzing repositories") as progress_bar:
             # Custom callback to update progress bar
             async def process_with_progress(task):
                 result = await task
@@ -429,16 +465,22 @@ async def main():
     if "--debug" in sys.argv:
         DEBUG = True
         logger.info("Debug mode enabled")
-        # Set loguru level to DEBUG
-        logger.remove()
-        logger.add(sys.stderr, level="DEBUG", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
-        logger.add("github_stats_{time}.log", rotation="10 MB", level="DEBUG", format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+        # Set loguru level to DEBUG for console output
+        logger.configure(handlers=[
+            {"sink": tqdm_sink, "level": "DEBUG", "colorize": True, 
+             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
+            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
+             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
+        ])
         sys.argv.remove("--debug")
     else:
-        # Set loguru level to INFO
-        logger.remove()
-        logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
-        logger.add("github_stats_{time}.log", rotation="10 MB", level="DEBUG", format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+        # Set loguru level to INFO for console output
+        logger.configure(handlers=[
+            {"sink": tqdm_sink, "level": "INFO", "colorize": True, 
+             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
+            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
+             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
+        ])
         
     username = sys.argv[1]
     logger.info(f"Starting GitHub statistics analysis for user: {username}")
