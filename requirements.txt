@@ -1,0 +1,3 @@
+httpx
+tqdm
+python-dotenv
