@@ -1,5 +1,5 @@
-httpx
-tqdm
-python-dotenv
-loguru
-rich
+httpx>=0.23.0
+rich>=12.0.0
+loguru>=0.6.0
+tqdm>=4.64.0
+python-dotenv>=0.20.0

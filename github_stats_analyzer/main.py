@@ -24,16 +24,16 @@ async def main_async():
     logger.info("GitHub Statistics Analyzer starting")
     
     # Parse command line arguments
-    username, debug_mode, excluded_languages = parse_args()
+    username, debug_mode, excluded_languages, github_token, access_level = parse_args()
     
     # Configure logger based on debug mode
     configure_logger(debug_mode)
     
     # Validate environment
-    validate_environment()
+    validate_environment(github_token)
     
     logger.info(f"Starting GitHub statistics analysis for user: {username}")
-    analyzer = GitHubStatsAnalyzer(username, excluded_languages)
+    analyzer = GitHubStatsAnalyzer(username, excluded_languages, access_level)
     
     try:
         await analyzer.analyze()
