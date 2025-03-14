@@ -10,8 +10,8 @@ from typing import Tuple, Set, Optional
 
 import httpx
 
-from config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel
-from logger import logger, configure_logger
+from github_stats_analyzer.config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel
+from github_stats_analyzer.logger import logger, configure_logger
 
 def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str]:
     """Parse command line arguments.

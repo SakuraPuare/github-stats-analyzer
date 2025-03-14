@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GitHub API client for GitHub User Statistics Analyzer
+GitHub API client for the GitHub User Statistics Analyzer
 """
 
 import time
@@ -10,8 +10,15 @@ from typing import Dict, List, Tuple, Any, Union, Optional
 
 import httpx
 
-from config import GITHUB_API_URL, GITHUB_TOKEN, AccessLevel, RATE_LIMIT_WITH_TOKEN, RATE_LIMIT_WITHOUT_TOKEN, ERROR_HANDLING_CONFIG
-from logger import logger
+from github_stats_analyzer.config import (
+    GITHUB_API_URL,
+    GITHUB_TOKEN,
+    AccessLevel,
+    RATE_LIMIT_WITH_TOKEN,
+    RATE_LIMIT_WITHOUT_TOKEN,
+    ERROR_HANDLING_CONFIG
+)
+from github_stats_analyzer.logger import logger
 
 class GitHubApiClient:
     """Client for interacting with the GitHub API."""

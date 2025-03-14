@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-GitHub User Statistics Analyzer core functionality
+GitHub User Statistics Analyzer
 """
 
 import asyncio
+import httpx
 from typing import Dict, List, Tuple, Any, Optional, Set, Union
 from datetime import datetime
 
@@ -20,11 +21,24 @@ from rich.align import Align
 from rich.style import Style
 from rich import print as rprint
 
-from config import GITHUB_API_URL, MAX_CONCURRENT_REPOS, EXCLUDED_LANGUAGES, ACCESS_LEVEL_CONFIG, REPO_LIMITS, COMMIT_LIMITS
-from logger import logger, TqdmProgressBar
-from models import RepoStats
-from api import GitHubApiClient, AccessLevel
-from utils import is_code_file, should_exclude_repo, format_datetime
+from github_stats_analyzer.config import (
+    GITHUB_API_URL,
+    MAX_CONCURRENT_REPOS,
+    EXCLUDED_LANGUAGES,
+    ACCESS_LEVEL_CONFIG,
+    REPO_LIMITS,
+    COMMIT_LIMITS
+)
+from github_stats_analyzer.logger import logger, TqdmProgressBar
+from github_stats_analyzer.models import (
+    Repository,
+    Commit,
+    LanguageStats,
+    AccessLevel,
+    RepoStats
+)
+from github_stats_analyzer.api import GitHubAPIClient
+from github_stats_analyzer.utils import is_code_file, should_exclude_repo, format_datetime
 
 class GitHubStatsAnalyzer:
     def __init__(
@@ -46,7 +60,7 @@ class GitHubStatsAnalyzer:
         self.config = ACCESS_LEVEL_CONFIG[access_level]
         
         # Initialize API client
-        self.api_client = GitHubApiClient(access_level)
+        self.api_client = GitHubAPIClient(access_level)
         
         # Initialize statistics
         self.total_additions = 0
