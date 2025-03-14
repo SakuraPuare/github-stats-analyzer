@@ -38,16 +38,18 @@ HEADERS = {
 
 # Configuration
 MAX_CONCURRENT_REQUESTS = 5  # Maximum number of concurrent requests to GitHub API
+DEBUG = False  # Set to True to enable debug output
 
 class GitHubStatsAnalyzer:
     def __init__(self, username: str):
         self.username = username
-        self.client = httpx.AsyncClient(headers=HEADERS, timeout=30.0)
+        self.client = httpx.AsyncClient(headers=HEADERS, timeout=60.0)  # Increased timeout
         self.repos: List[Dict[str, Any]] = []
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)  # Rate limiting semaphore
+        self.failed_repos = []  # Track repos that failed to fetch stats
         
     async def close(self):
         await self.client.aclose()
@@ -75,8 +77,64 @@ class GitHubStatsAnalyzer:
             
         return all_repos
     
+    async def get_repo_commits(self, repo: Dict[str, Any]) -> Tuple[int, int]:
+        """Get additions and deletions by analyzing individual commits."""
+        async with self.semaphore:  # Limit concurrent requests
+            repo_name = repo["name"]
+            additions = 0
+            deletions = 0
+            page = 1
+            
+            try:
+                while True:
+                    response = await self.client.get(
+                        f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits",
+                        params={"page": page, "per_page": 100, "author": self.username}
+                    )
+                    
+                    if response.status_code != 200:
+                        if DEBUG:
+                            print(f"Error fetching commits for {repo_name}: {response.status_code}")
+                        break
+                        
+                    commits = response.json()
+                    if not commits:
+                        break
+                        
+                    # Process each commit
+                    for commit in commits:
+                        sha = commit.get("sha")
+                        if not sha:
+                            continue
+                            
+                        # Get commit details
+                        commit_response = await self.client.get(
+                            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits/{sha}"
+                        )
+                        
+                        if commit_response.status_code != 200:
+                            continue
+                            
+                        commit_data = commit_response.json()
+                        stats = commit_data.get("stats", {})
+                        
+                        additions += stats.get("additions", 0)
+                        deletions += stats.get("deletions", 0)
+                        
+                    page += 1
+                    
+                    # Avoid rate limiting
+                    await asyncio.sleep(0.1)
+                    
+                return additions, deletions
+                
+            except Exception as e:
+                if DEBUG:
+                    print(f"Error processing commits for {repo_name}: {str(e)}")
+                return 0, 0
+    
     async def get_repo_stats(self, repo: Dict[str, Any]) -> Tuple[int, int]:
-        """Get additions and deletions for a repository."""
+        """Get additions and deletions for a repository using stats/contributors endpoint."""
         async with self.semaphore:  # Limit concurrent requests
             repo_name = repo["name"]
             response = await self.client.get(
@@ -90,20 +148,36 @@ class GitHubStatsAnalyzer:
                 return await self.get_repo_stats(repo)
             
             if response.status_code != 200:
-                print(f"Error fetching stats for {repo_name}: {response.status_code}")
-                return 0, 0
+                if DEBUG:
+                    print(f"Error fetching stats for {repo_name}: {response.status_code}")
+                self.failed_repos.append(repo_name)
+                # Fall back to commit analysis
+                return await self.get_repo_commits(repo)
                 
             stats = response.json()
+            if not stats:
+                if DEBUG:
+                    print(f"No stats returned for {repo_name}, falling back to commit analysis")
+                return await self.get_repo_commits(repo)
+                
             additions = 0
             deletions = 0
             
             # Find the user's contributions
+            user_found = False
             for contributor in stats:
-                if contributor.get("author", {}).get("login") == self.username:
+                if contributor.get("author", {}).get("login", "").lower() == self.username.lower():
+                    user_found = True
                     for week in contributor.get("weeks", []):
                         additions += week.get("a", 0)
                         deletions += week.get("d", 0)
                     break
+            
+            # If user not found in contributors, fall back to commit analysis
+            if not user_found:
+                if DEBUG:
+                    print(f"User not found in contributors for {repo_name}, falling back to commit analysis")
+                return await self.get_repo_commits(repo)
                     
             return additions, deletions
     
@@ -116,15 +190,24 @@ class GitHubStatsAnalyzer:
             )
             
             if response.status_code != 200:
-                print(f"Error fetching languages for {repo_name}: {response.status_code}")
+                if DEBUG:
+                    print(f"Error fetching languages for {repo_name}: {response.status_code}")
                 return {}
                 
             return response.json()
     
     async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, Dict[str, int]]:
         """Process a single repository to get stats and languages."""
+        repo_name = repo["name"]
+        if DEBUG:
+            print(f"Processing repository: {repo_name}")
+            
         additions, deletions = await self.get_repo_stats(repo)
         languages = await self.get_repo_languages(repo)
+        
+        if DEBUG:
+            print(f"Repository {repo_name}: +{additions}, -{deletions}, languages: {list(languages.keys())}")
+            
         return additions, deletions, languages
     
     async def analyze(self):
@@ -156,10 +239,17 @@ class GitHubStatsAnalyzer:
             progress_tasks = [process_with_progress(task) for task in tasks]
             
             # Execute all tasks concurrently and gather results
-            results = await asyncio.gather(*progress_tasks)
+            results = await asyncio.gather(*progress_tasks, return_exceptions=True)
             
             # Process results
-            for i, (additions, deletions, languages) in enumerate(results):
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    if DEBUG:
+                        repo_name = self.repos[i]["name"] if i < len(self.repos) else "unknown"
+                        print(f"Error processing repository {repo_name}: {str(result)}")
+                    continue
+                    
+                additions, deletions, languages = result
                 self.total_additions += additions
                 self.total_deletions += deletions
                 
@@ -176,6 +266,11 @@ class GitHubStatsAnalyzer:
         print(f"\nTotal Additions: {self.total_additions:,}")
         print(f"Total Deletions: {self.total_deletions:,}")
         print(f"Net Change: {self.total_additions - self.total_deletions:,}")
+        
+        if self.failed_repos:
+            print(f"\nNote: Could not fetch complete stats for {len(self.failed_repos)} repositories.")
+            if DEBUG:
+                print(f"Failed repositories: {', '.join(self.failed_repos)}")
         
         print("\nLanguage Statistics (sorted by lines of code):")
         print("-"*50)
@@ -204,13 +299,19 @@ class GitHubStatsAnalyzer:
             print(f"{repo['name']:<30} - Stars: {repo['stargazers_count']:<5} - Created: {created_at}")
 
 async def main():
-    if len(sys.argv) != 2:
-        print("Usage: python github_stats.py <github_username>")
+    if len(sys.argv) < 2:
+        print("Usage: python github_stats.py <github_username> [--debug]")
         sys.exit(1)
         
     if not GITHUB_TOKEN:
         print("Error: GitHub token not found. Please set GITHUB_TOKEN in .env file.")
         sys.exit(1)
+    
+    # Check for debug flag
+    global DEBUG
+    if "--debug" in sys.argv:
+        DEBUG = True
+        sys.argv.remove("--debug")
         
     username = sys.argv[1]
     analyzer = GitHubStatsAnalyzer(username)
@@ -223,6 +324,8 @@ async def main():
             print("Error: Invalid GitHub token. Please check your token.")
         elif e.response.status_code == 404:
             print(f"Error: User '{username}' not found.")
+        elif e.response.status_code == 403 and "rate limit" in e.response.text.lower():
+            print("Error: GitHub API rate limit exceeded. Please try again later.")
         else:
             print(f"HTTP Error: {e}")
     except Exception as e:
