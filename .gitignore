@@ -51,6 +51,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# 测试结果目录
+test_results/
+tests/test_results/
+
 # Translations
 *.mo
 *.pot
