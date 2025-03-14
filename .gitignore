@@ -181,7 +181,7 @@ cython_debug/
 
 # Logs
 *.log
-log/*
-!log/.gitkeep
+logs/*
+!logs/.gitkeep
 
 .env
