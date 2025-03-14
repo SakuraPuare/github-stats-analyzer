@@ -30,9 +30,17 @@ jobs:
       run: |
         # 创建结果目录
         mkdir -p results
+
+        touch results/RESULT.md
+
+        echo "## 分析结果" > results/RESULT.md
+
+        echo "```" >> results/RESULT.md
         
         # 运行分析器并将输出重定向到文件
-        github-stats ${{ github.repository_owner }} --access-level full > results/RESULT.md
+        github-stats ${{ github.repository_owner }} --access-level full >> results/RESULT.md
+
+        echo "```" >> results/RESULT.md
         
         # 添加时间戳和 Python 版本信息
         echo -e "\n\n---\nLast updated: $(date -u)\nPython version: $(python --version)" >> results/RESULT.md
