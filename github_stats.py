@@ -36,6 +36,9 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
+# Configuration
+MAX_CONCURRENT_REQUESTS = 5  # Maximum number of concurrent requests to GitHub API
+
 class GitHubStatsAnalyzer:
     def __init__(self, username: str):
         self.username = username
@@ -44,6 +47,7 @@ class GitHubStatsAnalyzer:
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
+        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)  # Rate limiting semaphore
         
     async def close(self):
         await self.client.aclose()
@@ -73,47 +77,55 @@ class GitHubStatsAnalyzer:
     
     async def get_repo_stats(self, repo: Dict[str, Any]) -> Tuple[int, int]:
         """Get additions and deletions for a repository."""
-        repo_name = repo["name"]
-        response = await self.client.get(
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
-        )
-        
-        # GitHub sometimes returns 202 while computing stats
-        if response.status_code == 202:
-            # Wait and retry
-            await asyncio.sleep(2)
-            return await self.get_repo_stats(repo)
-        
-        if response.status_code != 200:
-            print(f"Error fetching stats for {repo_name}: {response.status_code}")
-            return 0, 0
+        async with self.semaphore:  # Limit concurrent requests
+            repo_name = repo["name"]
+            response = await self.client.get(
+                f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
+            )
             
-        stats = response.json()
-        additions = 0
-        deletions = 0
-        
-        # Find the user's contributions
-        for contributor in stats:
-            if contributor.get("author", {}).get("login") == self.username:
-                for week in contributor.get("weeks", []):
-                    additions += week.get("a", 0)
-                    deletions += week.get("d", 0)
-                break
+            # GitHub sometimes returns 202 while computing stats
+            if response.status_code == 202:
+                # Wait and retry
+                await asyncio.sleep(2)
+                return await self.get_repo_stats(repo)
+            
+            if response.status_code != 200:
+                print(f"Error fetching stats for {repo_name}: {response.status_code}")
+                return 0, 0
                 
-        return additions, deletions
+            stats = response.json()
+            additions = 0
+            deletions = 0
+            
+            # Find the user's contributions
+            for contributor in stats:
+                if contributor.get("author", {}).get("login") == self.username:
+                    for week in contributor.get("weeks", []):
+                        additions += week.get("a", 0)
+                        deletions += week.get("d", 0)
+                    break
+                    
+            return additions, deletions
     
     async def get_repo_languages(self, repo: Dict[str, Any]) -> Dict[str, int]:
         """Get language breakdown for a repository."""
-        repo_name = repo["name"]
-        response = await self.client.get(
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
-        )
-        
-        if response.status_code != 200:
-            print(f"Error fetching languages for {repo_name}: {response.status_code}")
-            return {}
+        async with self.semaphore:  # Limit concurrent requests
+            repo_name = repo["name"]
+            response = await self.client.get(
+                f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
+            )
             
-        return response.json()
+            if response.status_code != 200:
+                print(f"Error fetching languages for {repo_name}: {response.status_code}")
+                return {}
+                
+            return response.json()
+    
+    async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, Dict[str, int]]:
+        """Process a single repository to get stats and languages."""
+        additions, deletions = await self.get_repo_stats(repo)
+        languages = await self.get_repo_languages(repo)
+        return additions, deletions, languages
     
     async def analyze(self):
         """Analyze all repositories for the user."""
@@ -126,21 +138,34 @@ class GitHubStatsAnalyzer:
         if not self.repos:
             print("No repositories to analyze.")
             return
+        
+        # Create tasks for all repositories
+        tasks = []
+        for repo in self.repos:
+            tasks.append(self.process_repo(repo))
+        
+        # Process repositories in parallel with progress bar
+        with tqdm(total=len(tasks), desc="Analyzing repositories") as progress_bar:
+            # Custom callback to update progress bar
+            async def process_with_progress(task):
+                result = await task
+                progress_bar.update(1)
+                return result
             
-        # Process each repository with progress bar
-        for repo in tqdm(self.repos, desc="Analyzing repositories"):
-            # Get additions and deletions
-            additions, deletions = await self.get_repo_stats(repo)
-            self.total_additions += additions
-            self.total_deletions += deletions
+            # Create tasks with progress tracking
+            progress_tasks = [process_with_progress(task) for task in tasks]
             
-            # Get language statistics
-            languages = await self.get_repo_languages(repo)
-            for language, bytes_count in languages.items():
-                self.language_stats[language] = self.language_stats.get(language, 0) + bytes_count
+            # Execute all tasks concurrently and gather results
+            results = await asyncio.gather(*progress_tasks)
+            
+            # Process results
+            for i, (additions, deletions, languages) in enumerate(results):
+                self.total_additions += additions
+                self.total_deletions += deletions
                 
-            # Avoid rate limiting
-            await asyncio.sleep(0.1)
+                # Update language statistics
+                for language, bytes_count in languages.items():
+                    self.language_stats[language] = self.language_stats.get(language, 0) + bytes_count
     
     def print_results(self):
         """Print the analysis results."""
