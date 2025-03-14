@@ -1,130 +1,27 @@
 #!/usr/bin/env python3
 """
-GitHub User Statistics Analyzer
-
-This script analyzes a GitHub user's repositories to collect statistics on:
-- Additions and deletions across all repositories
-- Lines of code per programming language
-- Ignores forked repositories
-
-Usage:
-    python github_stats.py <github_username>
-
-Requirements:
-    - GitHub Personal Access Token in .env file
+GitHub User Statistics Analyzer core functionality
 """
 
-import os
-import sys
-import json
 import asyncio
-import time
-from typing import Dict, List, Tuple, Any, Optional, Union, Set, NamedTuple
-from datetime import datetime
-import io
+from typing import Dict, List, Tuple, Any, Optional, Set, Union
 
-import httpx
-from tqdm import tqdm
-from dotenv import load_dotenv
-from loguru import logger
 from rich.console import Console
 from rich.table import Table
 from rich import box
 from rich.panel import Panel
 from rich.text import Text
 
-# Load environment variables
-load_dotenv()
-
-# GitHub API configuration
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_API_URL = "https://api.github.com"
-HEADERS = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json"
-}
-
-# Configuration
-MAX_CONCURRENT_REPOS = 5  # Maximum number of repositories to process concurrently
-DEBUG = False  # Set to True to enable debug output
-MAX_RETRIES = 3  # Maximum number of retries for HTTP requests
-RETRY_DELAY = 1.0  # Initial delay between retries (seconds)
-
-# Languages to exclude from line count statistics (can cause data skew)
-EXCLUDED_LANGUAGES = {
-    "Mathematica",       # Contains a lot of output and markdown
-    "Jupyter Notebook",  # Contains a lot of output and markdown
-    "HTML",              # Often generated or contains a lot of boilerplate
-    "CSS",               # Often minified or generated
-    "JSON",              # Data files, not code
-    "YAML",              # Configuration files
-    "Markdown",          # Documentation
-    "Text",              # Plain text files
-    "XML",               # Data files
-    "CSV",               # Data files
-    "TSV",               # Data files
-    "reStructuredText",  # Documentation
-    "SVG",               # Vector graphics
-}
-
-# Custom sink for loguru that uses tqdm.write to avoid breaking progress bars
-def tqdm_sink(message):
-    tqdm.write(message, end="")
-
-# Configure loguru logger
-logger.remove()  # Remove default handler
-
-# Add file handler (not affected by tqdm)
-logger.add(
-    "github_stats_{time}.log", 
-    rotation="10 MB", 
-    level="DEBUG", 
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
-)
-
-# Add console handler using tqdm.write
-logger.add(
-    tqdm_sink,
-    colorize=True,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
-
-class TqdmProgressBar:
-    """Custom progress bar class that integrates with loguru."""
-    
-    def __init__(self, total, desc):
-        self.pbar = tqdm(total=total, desc=desc)
-        
-    def update(self, n=1):
-        self.pbar.update(n)
-        
-    def close(self):
-        self.pbar.close()
-        
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
-class RepoStats(NamedTuple):
-    """Statistics for a single repository."""
-    name: str
-    additions: int
-    deletions: int
-    net_change: int
-    code_additions: int  # Additions in code files only
-    code_deletions: int  # Deletions in code files only
-    code_net_change: int  # Net change in code files only
-    languages: Dict[str, int]
-    stars: int
-    created_at: str
-    excluded: bool
+from config import GITHUB_API_URL, MAX_CONCURRENT_REPOS, EXCLUDED_LANGUAGES
+from logger import logger, TqdmProgressBar
+from models import RepoStats
+from api import GitHubApiClient
+from utils import is_code_file, should_exclude_repo, format_datetime
 
 class GitHubStatsAnalyzer:
     def __init__(self, username: str, excluded_languages: Optional[Set[str]] = None):
         self.username = username
-        self.client = httpx.AsyncClient(headers=HEADERS, timeout=60.0)  # Increased timeout
+        self.api_client = GitHubApiClient()
         self.repos: List[Dict[str, Any]] = []
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
@@ -135,109 +32,13 @@ class GitHubStatsAnalyzer:
         self.filtered_deletions = 0  # Deletions excluding certain languages
         self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)  # Limit concurrent repository processing
         self.failed_repos = []  # Track repos that failed to fetch stats
-        self.request_count = 0  # Track number of API requests
         self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
         self.repo_language_stats: Dict[str, Dict[str, int]] = {}  # Track language stats per repo
         self.repo_stats: Dict[str, RepoStats] = {}  # Detailed stats for each repo
         
-        # Define file extensions to exclude (non-code files)
-        self.non_code_extensions = {
-            '.csv', '.json', '.yaml', '.yml', '.md', '.txt', '.log', '.data',
-            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.doc', '.docx',
-            '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz', '.rar',
-            '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac', '.ogg',
-            '.ttf', '.woff', '.woff2', '.eot', '.otf',
-            '.min.js', '.min.css'  # Minified files
-        }
-        
     async def close(self):
-        await self.client.aclose()
-        logger.info(f"Total GitHub API requests made: {self.request_count}")
-        
-    async def github_request(
-        self, 
-        method: str, 
-        url: str, 
-        params: Optional[Dict[str, Any]] = None, 
-        retries: int = MAX_RETRIES
-    ) -> Tuple[int, Union[Dict[str, Any], List[Dict[str, Any]], None]]:
-        """
-        Unified method for making GitHub API requests with logging and error handling.
-        
-        Args:
-            method: HTTP method (get, post, etc.)
-            url: API endpoint URL
-            params: Query parameters
-            retries: Number of retries for failed requests
-            
-        Returns:
-            Tuple of (status_code, response_data)
-        """
-        self.request_count += 1
-        request_id = f"REQ-{self.request_count}"
-        
-        # Log the request
-        log_params = str(params) if params else "None"
-        logger.debug(f"{request_id} | Requesting: {method.upper()} {url} | Params: {log_params}")
-        
-        # Make the request
-        start_time = time.time()
-        current_retry = 0
-        
-        while current_retry <= retries:
-            try:
-                if method.lower() == "get":
-                    response = await self.client.get(url, params=params)
-                else:
-                    logger.error(f"{request_id} | Unsupported HTTP method: {method}")
-                    return 400, None
-                
-                # Calculate request duration
-                duration = time.time() - start_time
-                
-                # Log the response
-                logger.debug(f"{request_id} | Response: {response.status_code} | Duration: {duration:.2f}s")
-                
-                # Handle rate limiting
-                if response.status_code == 403 and "rate limit" in response.text.lower():
-                    reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
-                    if reset_time > 0:
-                        wait_time = max(0, reset_time - time.time())
-                        if wait_time > 0 and wait_time < 300:  # Only wait if less than 5 minutes
-                            logger.warning(f"{request_id} | Rate limit hit, waiting {wait_time:.1f}s")
-                            await asyncio.sleep(wait_time + 1)
-                            continue
-                
-                # Handle 202 (processing) status for certain endpoints
-                if response.status_code == 202 and "stats" in url:
-                    logger.info(f"{request_id} | GitHub is computing stats, waiting 2s...")
-                    await asyncio.sleep(2)
-                    continue
-                
-                # Parse JSON response if successful
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        return response.status_code, data
-                    except json.JSONDecodeError:
-                        logger.error(f"{request_id} | Failed to parse JSON response")
-                        return response.status_code, None
-                
-                # Return status code and None for non-200 responses
-                return response.status_code, None
-                
-            except (httpx.RequestError, httpx.TimeoutException) as e:
-                current_retry += 1
-                if current_retry <= retries:
-                    # Exponential backoff
-                    wait_time = RETRY_DELAY * (2 ** (current_retry - 1))
-                    logger.warning(f"{request_id} | Request failed: {str(e)}. Retrying in {wait_time:.1f}s ({current_retry}/{retries})")
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"{request_id} | Request failed after {retries} retries: {str(e)}")
-                    return 0, None
-        
-        return 0, None
+        """Close the API client."""
+        await self.api_client.close()
         
     async def get_user_repos(self) -> List[Dict[str, Any]]:
         """Get all repositories for the user (excluding forks)."""
@@ -249,7 +50,7 @@ class GitHubStatsAnalyzer:
         while True:
             logger.debug(f"Fetching page {page} of repositories")
             
-            status, repos = await self.github_request(
+            status, repos = await self.api_client.github_request(
                 "get",
                 f"{GITHUB_API_URL}/users/{self.username}/repos",
                 params={"page": page, "per_page": 100}
@@ -268,13 +69,6 @@ class GitHubStatsAnalyzer:
             
         logger.info(f"Total non-forked repositories found: {len(all_repos)}")
         return all_repos
-    
-    def is_code_file(self, filename: str) -> bool:
-        """Check if a file is a code file based on its extension."""
-        for ext in self.non_code_extensions:
-            if filename.lower().endswith(ext):
-                return False
-        return True
 
     async def get_repo_commits(self, repo: Dict[str, Any]) -> Tuple[int, int]:
         """Get additions and deletions by analyzing individual commits."""
@@ -287,9 +81,9 @@ class GitHubStatsAnalyzer:
         
         try:
             while True:
-                logger.trace(f"Fetching page {page} of commits for {repo_name}")
+                logger.debug(f"Fetching page {page} of commits for {repo_name}")
                 
-                status, commits = await self.github_request(
+                status, commits = await self.api_client.github_request(
                     "get",
                     f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits",
                     params={"page": page, "per_page": 100, "author": self.username}
@@ -309,9 +103,9 @@ class GitHubStatsAnalyzer:
                         continue
                         
                     # Get commit details
-                    logger.trace(f"Fetching details for commit {sha[:7]} in {repo_name}")
+                    logger.debug(f"Fetching details for commit {sha[:7]} in {repo_name}")
                     
-                    status, commit_data = await self.github_request(
+                    status, commit_data = await self.api_client.github_request(
                         "get",
                         f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits/{sha}"
                     )
@@ -337,12 +131,12 @@ class GitHubStatsAnalyzer:
                         commit_total_deletions += file_deletions
                         
                         # Only count changes for code files
-                        if self.is_code_file(filename):
+                        if is_code_file(filename):
                             commit_code_additions += file_additions
                             commit_code_deletions += file_deletions
                     
                     # Log both total and code-only changes
-                    logger.trace(f"Commit {sha[:7]}: Total: +{commit_total_additions}, -{commit_total_deletions} | Code only: +{commit_code_additions}, -{commit_code_deletions}")
+                    logger.debug(f"Commit {sha[:7]}: Total: +{commit_total_additions}, -{commit_total_deletions} | Code only: +{commit_code_additions}, -{commit_code_deletions}")
                     
                     # Only add code changes to the total
                     additions += commit_code_additions
@@ -366,7 +160,7 @@ class GitHubStatsAnalyzer:
         logger.debug(f"Fetching stats for repository: {repo_name}")
         
         # First, get a list of all files in the repository to check which ones are code files
-        status, repo_contents = await self.github_request(
+        status, repo_contents = await self.api_client.github_request(
             "get",
             f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/git/trees/HEAD?recursive=1"
         )
@@ -376,14 +170,14 @@ class GitHubStatsAnalyzer:
             for item in repo_contents["tree"]:
                 if item.get("type") == "blob":  # It's a file
                     path = item.get("path", "")
-                    if self.is_code_file(path):
+                    if is_code_file(path):
                         code_files.add(path)
             logger.debug(f"Found {len(code_files)} code files in repository {repo_name}")
         else:
             logger.warning(f"Could not fetch file list for {repo_name}, will count all files as code files")
         
         # Now get the contributor stats
-        status, stats = await self.github_request(
+        status, stats = await self.api_client.github_request(
             "get",
             f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
         )
@@ -434,7 +228,7 @@ class GitHubStatsAnalyzer:
         repo_name = repo["name"]
         logger.debug(f"Fetching languages for repository: {repo_name}")
         
-        status, languages = await self.github_request(
+        status, languages = await self.api_client.github_request(
             "get",
             f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
         )
@@ -468,8 +262,8 @@ class GitHubStatsAnalyzer:
             self.repo_language_stats[repo_name] = languages
             
             # Store detailed stats for this repo
-            created_at = datetime.strptime(repo["created_at"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d")
-            is_excluded = self.should_exclude_repo(repo_name, languages)
+            created_at = format_datetime(repo["created_at"])
+            is_excluded = should_exclude_repo(repo_name, languages, self.excluded_languages)
             
             self.repo_stats[repo_name] = RepoStats(
                 name=repo_name,
@@ -494,7 +288,7 @@ class GitHubStatsAnalyzer:
         repo_name = repo["name"]
         logger.debug(f"Fetching total changes for repository: {repo_name}")
         
-        status, stats = await self.github_request(
+        status, stats = await self.api_client.github_request(
             "get",
             f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
         )
@@ -516,31 +310,6 @@ class GitHubStatsAnalyzer:
                 
         logger.debug(f"Repository {repo_name} total stats: +{additions}, -{deletions}")
         return additions, deletions
-    
-    def should_exclude_repo(self, repo_name: str, languages: Optional[Dict[str, int]] = None) -> bool:
-        """Determine if a repository should be excluded from filtered stats based on its languages."""
-        if languages is None:
-            if repo_name not in self.repo_language_stats:
-                return False
-            languages = self.repo_language_stats[repo_name]
-            
-        if not languages:
-            return False
-            
-        # Calculate total bytes
-        total_bytes = sum(languages.values())
-        
-        # Check if excluded languages make up more than 50% of the repo
-        excluded_bytes = sum(bytes_count for lang, bytes_count in languages.items() 
-                            if lang in self.excluded_languages)
-        
-        excluded_percentage = (excluded_bytes / total_bytes) * 100 if total_bytes > 0 else 0
-        
-        if excluded_percentage > 50:
-            logger.info(f"Repository {repo_name} excluded from filtered stats (excluded languages: {excluded_percentage:.1f}%)")
-            return True
-            
-        return False
     
     async def analyze(self):
         """Analyze all repositories for the user."""
@@ -592,7 +361,7 @@ class GitHubStatsAnalyzer:
                 self.code_deletions += code_deletions
                 
                 # Update filtered stats (excluding certain languages)
-                if not self.should_exclude_repo(repo_name):
+                if not should_exclude_repo(repo_name, languages, self.excluded_languages):
                     self.filtered_additions += code_additions
                     self.filtered_deletions += code_deletions
                 
@@ -742,78 +511,4 @@ class GitHubStatsAnalyzer:
         if any(repo.excluded for repo in self.repo_stats.values()):
             console.print("\n[italic red]*[/italic red] Repositories excluded from filtered statistics due to high percentage of excluded languages")
         
-        console.print(f"\nTotal GitHub API Requests: [bold]{self.request_count}[/bold]")
-
-async def main():
-    if len(sys.argv) < 2:
-        logger.error("Missing required username argument")
-        print("Usage: python github_stats.py <github_username> [--debug] [--include-all]")
-        sys.exit(1)
-        
-    if not GITHUB_TOKEN:
-        logger.error("GitHub token not found in .env file")
-        print("Error: GitHub token not found. Please set GITHUB_TOKEN in .env file.")
-        sys.exit(1)
-    
-    # Check for debug flag
-    global DEBUG
-    if "--debug" in sys.argv:
-        DEBUG = True
-        logger.info("Debug mode enabled")
-        # Set loguru level to DEBUG for console output
-        logger.configure(handlers=[
-            {"sink": tqdm_sink, "level": "DEBUG", "colorize": True, 
-             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
-             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
-        ])
-        sys.argv.remove("--debug")
-    else:
-        # Set loguru level to INFO for console output
-        logger.configure(handlers=[
-            {"sink": tqdm_sink, "level": "INFO", "colorize": True, 
-             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
-             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
-        ])
-    
-    # Check for include-all flag
-    excluded_languages = set()
-    if "--include-all" in sys.argv:
-        logger.info("Including all languages in statistics")
-        sys.argv.remove("--include-all")
-    else:
-        excluded_languages = EXCLUDED_LANGUAGES
-        logger.info(f"Excluding languages from filtered statistics: {', '.join(sorted(excluded_languages))}")
-        
-    username = sys.argv[1]
-    logger.info(f"Starting GitHub statistics analysis for user: {username}")
-    analyzer = GitHubStatsAnalyzer(username, excluded_languages)
-    
-    try:
-        await analyzer.analyze()
-        analyzer.print_results()
-        logger.success(f"Analysis for user {username} completed successfully")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            logger.error("Invalid GitHub token")
-            print("Error: Invalid GitHub token. Please check your token.")
-        elif e.response.status_code == 404:
-            logger.error(f"User '{username}' not found")
-            print(f"Error: User '{username}' not found.")
-        elif e.response.status_code == 403 and "rate limit" in e.response.text.lower():
-            logger.error("GitHub API rate limit exceeded")
-            print("Error: GitHub API rate limit exceeded. Please try again later.")
-        else:
-            logger.error(f"HTTP Error: {e}")
-            print(f"HTTP Error: {e}")
-    except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        print(f"Error: {e}")
-    finally:
-        await analyzer.close()
-        logger.info("Session closed")
-
-if __name__ == "__main__":
-    logger.info("GitHub Statistics Analyzer starting")
-    asyncio.run(main()) 
+        console.print(f"\nTotal GitHub API Requests: [bold]{self.api_client.request_count}[/bold]") 

@@ -44,13 +44,37 @@ GITHUB_TOKEN=your_personal_access_token_here
 Run the program with a GitHub username as an argument:
 
 ```bash
-python github_stats.py <github_username>
+python main.py <github_username>
 ```
 
 For example:
 ```bash
-python github_stats.py octocat
+python main.py octocat
 ```
+
+### Command Line Options
+
+The program supports the following command line options:
+
+```bash
+python main.py <github_username> [--debug] [--include-all]
+```
+
+- `--debug`: Enable debug output for more detailed logging
+- `--include-all`: Include all languages in statistics (don't exclude any)
+
+## Project Structure
+
+The project is organized into several modules:
+
+- `main.py`: Main entry point for the application
+- `analyzer.py`: Core analysis functionality
+- `api.py`: GitHub API client
+- `cli.py`: Command line interface
+- `config.py`: Configuration settings
+- `logger.py`: Logging configuration
+- `models.py`: Data models
+- `utils.py`: Utility functions
 
 ## Output
 
