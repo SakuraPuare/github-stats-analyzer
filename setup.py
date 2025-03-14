@@ -7,7 +7,7 @@ setup(
     name="github-stats-analyzer",
     version="0.1.0",
     author="SakuraPuare",
-    author_email="sakurapuare@gmail.com",  # 请替换为你的邮箱
+    author_email="sakurapuare@sakurapuare.com",
     description="A comprehensive GitHub user statistics analyzer",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -24,6 +24,8 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
     python_requires=">=3.7",

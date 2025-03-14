@@ -3,6 +3,8 @@
 [![Python 3.7+](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![PyPI version](https://badge.fury.io/py/github-stats-analyzer.svg)](https://badge.fury.io/py/github-stats-analyzer)
+[![PyPI downloads](https://img.shields.io/pypi/dm/github-stats-analyzer.svg)](https://pypi.org/project/github-stats-analyzer/)
 
 *Read this in [English](README.md).*
 
@@ -31,6 +33,14 @@
 
 ## 📥 安装
 
+### 通过 pip 安装（推荐）
+
+```bash
+pip install github-stats-analyzer
+```
+
+### 从源码安装
+
 1. 克隆此仓库：
 ```bash
 git clone https://github.com/SakuraPuare/github-stats-analyzer.git
@@ -42,7 +52,7 @@ cd github-stats-analyzer
 pip install -r requirements.txt
 ```
 
-3. 在项目目录中创建一个`.env`文件，并添加您的GitHub个人访问令牌：
+3. 在工作目录中创建一个`.env`文件，并添加您的GitHub个人访问令牌：
 ```
 GITHUB_TOKEN=your_personal_access_token_here
 ```
@@ -60,27 +70,52 @@ GITHUB_TOKEN=your_personal_access_token_here
 
 ## 🚀 使用方法
 
-使用GitHub用户名作为参数运行程序：
+### 命令行界面
 
+安装后，您可以通过以下三种方式使用该工具：
+
+1. 使用安装的命令：
+```bash
+github-stats <github_username>
+```
+
+2. 使用Python的-m参数：
+```bash
+python -m github_stats_analyzer <github_username>
+```
+
+3. 从源码运行：
 ```bash
 python main.py <github_username>
 ```
 
-例如：
-```bash
-python main.py octocat
-```
-
-### ⚙️ 命令行选项
+### 命令行选项
 
 程序支持以下命令行选项：
 
 ```bash
-python main.py <github_username> [--debug] [--include-all]
+github-stats <github_username> [--debug] [--include-all]
 ```
 
 - `--debug`：启用调试输出，获取更详细的日志
 - `--include-all`：在统计中包含所有语言（不排除任何语言）
+
+### Python API
+
+您也可以在Python代码中将其作为库使用：
+
+```python
+import asyncio
+from github_stats_analyzer import GitHubStatsAnalyzer
+
+async def analyze_user(username: str):
+    analyzer = GitHubStatsAnalyzer(username)
+    await analyzer.analyze()
+    analyzer.print_results()
+
+# 运行分析
+asyncio.run(analyze_user("octocat"))
+```
 
 ## 🏗️ 项目结构
 
