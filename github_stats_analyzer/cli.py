@@ -6,31 +6,50 @@ Command-line interface for GitHub User Statistics Analyzer
 import sys
 import argparse
 import os
-from typing import Tuple, Set, Optional
+from typing import Tuple, Set, Optional, Any
 
 import httpx
 
-from github_stats_analyzer.config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel
+from github_stats_analyzer.config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel, DEFAULT_EXCLUDED_LANGUAGES
 from github_stats_analyzer.logger import logger, configure_logger
+from github_stats_analyzer import __version__
 
-def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str]:
+def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any]:
     """Parse command line arguments.
     
     Returns:
-        Tuple of (username, debug_mode, excluded_languages, github_token, access_level)
+        Tuple of (username, debug_mode, excluded_languages, github_token, access_level, args)
+        where args is the complete argparse.Namespace object
     """
     parser = argparse.ArgumentParser(
         description="Analyze GitHub user statistics",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  github-stats octocat                      # Basic analysis of public repositories
+  github-stats octocat --access-level full  # Full analysis with token
+  github-stats octocat --token YOUR_TOKEN   # Specify token via command line
+  github-stats octocat --include-all        # Include all languages in statistics
+  github-stats octocat --debug              # Enable debug output
+        """
     )
     
+    # Add version argument
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"GitHub Stats Analyzer v{__version__}"
+    )
+    
+    # Required positional argument
     parser.add_argument(
         "username",
         help="GitHub username to analyze"
     )
     
+    # Optional arguments
     parser.add_argument(
-        "--debug",
+        "-d", "--debug",
         action="store_true",
         help="Enable debug output"
     )
@@ -38,21 +57,47 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str]:
     parser.add_argument(
         "--include-all",
         action="store_true",
-        help="Include all languages in statistics"
+        help="Include all languages in statistics (don't exclude any)"
     )
     
     parser.add_argument(
-        "--access-level",
+        "-a", "--access-level",
         choices=[AccessLevel.BASIC, AccessLevel.FULL],
         default=AccessLevel.BASIC,
         help=f"Access level to use. {AccessLevel.BASIC}: Limited data without token, {AccessLevel.FULL}: Full data with token"
     )
     
     parser.add_argument(
-        "--token",
+        "-t", "--token",
         help="GitHub Personal Access Token (can also be set via GITHUB_TOKEN environment variable)"
     )
     
+    parser.add_argument(
+        "-o", "--output",
+        choices=["text", "json", "csv"],
+        default="text",
+        help="Output format (default: text)"
+    )
+    
+    parser.add_argument(
+        "--exclude-languages",
+        nargs="+",
+        help="Languages to exclude from statistics (space-separated list)"
+    )
+    
+    parser.add_argument(
+        "--max-repos",
+        type=int,
+        help="Maximum number of repositories to analyze"
+    )
+    
+    parser.add_argument(
+        "--max-commits",
+        type=int,
+        help="Maximum number of commits to analyze per repository"
+    )
+    
+    # Parse arguments
     args = parser.parse_args()
     
     # Set debug mode
@@ -61,13 +106,18 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str]:
         logger.info("Debug mode enabled")
     
     # Set excluded languages
-    excluded_languages = None if args.include_all else set()
-    if excluded_languages:
-        logger.info(f"Excluding languages from filtered statistics: {', '.join(sorted(excluded_languages))}")
-    else:
+    excluded_languages = None
+    if args.include_all:
+        excluded_languages = set()
         logger.info("Including all languages in statistics")
+    elif args.exclude_languages:
+        excluded_languages = set(args.exclude_languages)
+        logger.info(f"Excluding languages from statistics: {', '.join(sorted(excluded_languages))}")
+    else:
+        excluded_languages = DEFAULT_EXCLUDED_LANGUAGES
+        logger.info(f"Using default excluded languages: {', '.join(sorted(excluded_languages))}")
     
-    return args.username, debug_mode, excluded_languages, args.token, args.access_level
+    return args.username, debug_mode, excluded_languages, args.token, args.access_level, args
 
 def validate_environment(github_token: Optional[str] = None) -> None:
     """Validate that the environment is properly set up.

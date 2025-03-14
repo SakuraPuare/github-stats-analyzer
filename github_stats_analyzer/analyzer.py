@@ -5,6 +5,9 @@ GitHub User Statistics Analyzer
 
 import asyncio
 import httpx
+import json
+import csv
+import sys
 from typing import Dict, List, Optional, Set, Tuple, Any
 from datetime import datetime
 from rich.console import Console
@@ -33,17 +36,33 @@ from github_stats_analyzer.utils import is_code_file, should_exclude_repo, forma
 class GitHubStatsAnalyzer:
     """GitHub User Statistics Analyzer"""
     
-    def __init__(self, username: str, excluded_languages: Optional[Set[str]] = None, access_level: str = AccessLevel.BASIC):
+    def __init__(
+        self, 
+        username: str, 
+        excluded_languages: Optional[Set[str]] = None, 
+        access_level: str = AccessLevel.BASIC,
+        max_repos: Optional[int] = None,
+        max_commits: Optional[int] = None,
+        output_format: str = "text"
+    ):
         """Initialize the analyzer.
         
         Args:
             username: GitHub username to analyze
             excluded_languages: Set of languages to exclude from statistics
             access_level: Access level to use (basic or full)
+            max_repos: Maximum number of repositories to analyze
+            max_commits: Maximum number of commits to analyze per repository
+            output_format: Output format (text, json, csv)
         """
         self.username = username
         self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
         self.access_level = access_level
+        self.output_format = output_format
+        
+        # Override default limits if specified
+        self.max_repos = max_repos or REPO_LIMITS[access_level]
+        self.max_commits = max_commits or COMMIT_LIMITS[access_level]
         
         # Initialize API client
         self.api_client = GitHubAPIClient(access_level)
@@ -88,10 +107,12 @@ class GitHubStatsAnalyzer:
             # Basic access: only public repos, limited number
             repos = await self.api_client.get_user_repos(self.username)
             # Apply repository limit for basic access
-            repos = repos[:REPO_LIMITS[AccessLevel.BASIC]]
+            repos = repos[:self.max_repos]
         else:
             # Full access: all repos including private ones
             repos = await self.api_client.get_user_repos(self.username, include_private=True)
+            # Apply repository limit for full access
+            repos = repos[:self.max_repos]
         
         # Filter repositories based on access level
         filtered_repos = []
@@ -169,10 +190,12 @@ class GitHubStatsAnalyzer:
             # Basic access: limited number of commits
             commits = await self.api_client.get_repo_commits(repo.full_name, self.username)
             # Apply commit limit for basic access
-            commits = commits[:COMMIT_LIMITS[AccessLevel.BASIC]]
+            commits = commits[:self.max_commits]
         else:
             # Full access: all commits
             commits = await self.api_client.get_repo_commits(repo.full_name, self.username)
+            # Apply commit limit for full access
+            commits = commits[:self.max_commits]
         
         repo_stats.commit_count = len(commits)
         
@@ -236,6 +259,18 @@ class GitHubStatsAnalyzer:
         """Print analysis results."""
         logger.info("Printing analysis results")
         
+        if self.output_format == "text":
+            self._print_text_results()
+        elif self.output_format == "json":
+            self._print_json_results()
+        elif self.output_format == "csv":
+            self._print_csv_results()
+        else:
+            logger.warning(f"Unknown output format: {self.output_format}, using text format")
+            self._print_text_results()
+    
+    def _print_text_results(self):
+        """Print results in text format."""
         # Print header
         self.console.print(f"\n[bold cyan]GitHub Statistics for [bold yellow]{self.username}[/bold yellow][/bold cyan]\n")
         
@@ -295,6 +330,90 @@ class GitHubStatsAnalyzer:
             
             # Print table
             self.console.print(table)
+    
+    def _print_json_results(self):
+        """Print results in JSON format."""
+        # Create result dictionary
+        result = {
+            "username": self.username,
+            "summary": {
+                "repositories_count": len(self.repo_stats),
+                "total_additions": self.total_additions,
+                "total_deletions": self.total_deletions,
+                "total_lines_changed": self.total_lines
+            },
+            "languages": {},
+            "repositories": []
+        }
+        
+        # Add language statistics
+        total_bytes = sum(self.language_stats.values())
+        for language, bytes_count in self.language_stats.items():
+            percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
+            result["languages"][language] = {
+                "bytes": bytes_count,
+                "percentage": round(percentage, 2)
+            }
+        
+        # Add repository statistics
+        for repo in self.repo_stats:
+            repo_data = {
+                "name": repo.name,
+                "full_name": repo.full_name,
+                "is_fork": repo.is_fork,
+                "stars": repo.stars,
+                "created_at": format_datetime(repo.created_at) if repo.created_at else None,
+                "additions": repo.additions,
+                "deletions": repo.deletions,
+                "total_lines": repo.total_lines,
+                "commit_count": repo.commit_count,
+                "languages": repo.languages
+            }
+            result["repositories"].append(repo_data)
+        
+        # Print JSON
+        print(json.dumps(result, indent=2))
+    
+    def _print_csv_results(self):
+        """Print results in CSV format."""
+        # Print summary
+        writer = csv.writer(sys.stdout)
+        writer.writerow(["GitHub Statistics for", self.username])
+        writer.writerow([])
+        writer.writerow(["Summary"])
+        writer.writerow(["Total repositories", len(self.repo_stats)])
+        writer.writerow(["Total additions", self.total_additions])
+        writer.writerow(["Total deletions", self.total_deletions])
+        writer.writerow(["Total lines changed", self.total_lines])
+        writer.writerow([])
+        
+        # Print language breakdown
+        writer.writerow(["Language Breakdown"])
+        writer.writerow(["Language", "Bytes", "Percentage"])
+        
+        # Sort languages by bytes
+        sorted_languages = sorted(self.language_stats.items(), key=lambda x: x[1], reverse=True)
+        total_bytes = sum(self.language_stats.values())
+        
+        # Add rows
+        for language, bytes_count in sorted_languages:
+            percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
+            writer.writerow([language, bytes_count, f"{percentage:.2f}%"])
+        
+        writer.writerow([])
+        
+        # Print repositories
+        if self.access_level == AccessLevel.FULL:
+            writer.writerow(["Repositories"])
+            writer.writerow(["Repository", "Stars", "Created"])
+            
+            # Sort repositories by stars
+            sorted_repos = sorted(self.repo_stats, key=lambda x: x.stars, reverse=True)
+            
+            # Add rows
+            for repo in sorted_repos:
+                created_at = format_datetime(repo.created_at) if repo.created_at else "Unknown"
+                writer.writerow([repo.name, repo.stars, created_at])
     
     async def close(self):
         """Close the API client."""

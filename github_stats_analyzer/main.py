@@ -10,6 +10,18 @@ This script analyzes a GitHub user's repositories to collect statistics on:
 Usage:
     github-stats <github_username>
     python -m github_stats_analyzer <github_username>
+    
+Options:
+    -h, --help              Show help message and exit
+    -v, --version           Show version and exit
+    -d, --debug             Enable debug output
+    --include-all           Include all languages in statistics
+    -a, --access-level      Access level (basic or full)
+    -t, --token             GitHub Personal Access Token
+    -o, --output            Output format (text, json, csv)
+    --exclude-languages     Languages to exclude from statistics
+    --max-repos             Maximum number of repositories to analyze
+    --max-commits           Maximum number of commits to analyze per repository
 """
 
 import asyncio
@@ -22,7 +34,7 @@ from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
 async def main_async():
     """Main entry point for the application."""
     # Parse command line arguments
-    username, debug_mode, excluded_languages, github_token, access_level = parse_args()
+    username, debug_mode, excluded_languages, github_token, access_level, args = parse_args()
     
     # Configure logger based on debug mode
     configure_logger(debug_mode)
@@ -33,7 +45,14 @@ async def main_async():
     validate_environment(github_token)
     
     logger.info(f"Starting GitHub statistics analysis for user: {username}")
-    analyzer = GitHubStatsAnalyzer(username, excluded_languages, access_level)
+    analyzer = GitHubStatsAnalyzer(
+        username=username, 
+        excluded_languages=excluded_languages, 
+        access_level=access_level,
+        max_repos=args.max_repos,
+        max_commits=args.max_commits,
+        output_format=args.output
+    )
     
     try:
         await analyzer.analyze()
