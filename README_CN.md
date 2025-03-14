@@ -128,7 +128,7 @@ python main.py <github_username>
 程序支持以下命令行选项：
 
 ```bash
-github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN]
+github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY]
 ```
 
 - `--debug`：启用调试输出，获取更详细的日志
@@ -137,6 +137,11 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
   - `basic`：无 token 的有限数据（默认）
   - `full`：有 token 的完整数据
 - `--token`：GitHub 个人访问令牌（也可以通过 GITHUB_TOKEN 环境变量设置）
+- `--max-repos`：要分析的最大仓库数量
+- `--max-commits`：每个仓库要分析的最大提交数量
+- `--max-concurrent-repos`：并发处理的最大仓库数量（默认：10）
+- `--max-retries`：HTTP 请求的最大重试次数（默认：3）
+- `--retry-delay`：重试之间的初始延迟秒数（默认：1.0）
 
 ### 访问级别
 

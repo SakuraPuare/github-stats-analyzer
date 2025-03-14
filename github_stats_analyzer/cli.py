@@ -10,7 +10,7 @@ from typing import Tuple, Set, Optional, Any
 
 import httpx
 
-from github_stats_analyzer.config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel, DEFAULT_EXCLUDED_LANGUAGES
+from github_stats_analyzer.config import GITHUB_TOKEN, DEBUG, EXCLUDED_LANGUAGES, AccessLevel, DEFAULT_EXCLUDED_LANGUAGES, MAX_CONCURRENT_REPOS, MAX_RETRIES, RETRY_DELAY
 from github_stats_analyzer.logger import logger, configure_logger
 from github_stats_analyzer import __version__
 
@@ -95,6 +95,28 @@ Examples:
         "--max-commits",
         type=int,
         help="Maximum number of commits to analyze per repository"
+    )
+    
+    # Add new CLI options for configuration parameters
+    parser.add_argument(
+        "--max-concurrent-repos",
+        type=int,
+        default=MAX_CONCURRENT_REPOS,
+        help=f"Maximum number of repositories to process concurrently (default: {MAX_CONCURRENT_REPOS})"
+    )
+    
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=MAX_RETRIES,
+        help=f"Maximum number of retries for HTTP requests (default: {MAX_RETRIES})"
+    )
+    
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=RETRY_DELAY,
+        help=f"Initial delay between retries in seconds (default: {RETRY_DELAY})"
     )
     
     # Parse arguments

@@ -23,8 +23,10 @@ This Python program analyzes a GitHub user's repositories to collect comprehensi
 - 🔤 Lines of code per programming language
 - 📚 Detailed repository information
 
-![Example Output](./assets/sample_1.webp)
-![Example Output](./assets/sample_2.webp)
+<div align="center">
+  <img src="./assets/sample_1.webp" width="49%" alt="Example Output 1" />
+  <img src="./assets/sample_2.webp" width="49%" alt="Example Output 2" />
+</div>
 
 ## 📊 Latest Analysis Results
 
@@ -127,7 +129,7 @@ python main.py <github_username>
 The program supports the following command line options:
 
 ```bash
-github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN]
+github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY]
 ```
 
 - `--debug`: Enable debug output for more detailed logging
@@ -136,6 +138,11 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
   - `basic`: Limited data without token (default)
   - `full`: Full data with token
 - `--token`: GitHub Personal Access Token (can also be set via GITHUB_TOKEN environment variable)
+- `--max-repos`: Maximum number of repositories to analyze
+- `--max-commits`: Maximum number of commits to analyze per repository
+- `--max-concurrent-repos`: Maximum number of repositories to process concurrently (default: 10)
+- `--max-retries`: Maximum number of retries for HTTP requests (default: 3)
+- `--retry-delay`: Initial delay between retries in seconds (default: 1.0)
 
 ### Access Levels
 

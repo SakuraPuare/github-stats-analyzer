@@ -24,10 +24,11 @@ if GITHUB_TOKEN:
     HEADERS["Authorization"] = f"token {GITHUB_TOKEN}"
 
 # Configuration
-MAX_CONCURRENT_REPOS = 5  # Maximum number of repositories to process concurrently
-DEBUG = False  # Set to True to enable debug output
-MAX_RETRIES = 3  # Maximum number of retries for HTTP requests
-RETRY_DELAY = 1.0  # Initial delay between retries (seconds)
+# These values can be overridden by environment variables
+MAX_CONCURRENT_REPOS = int(os.getenv("MAX_CONCURRENT_REPOS", "10"))  # Maximum number of repositories to process concurrently
+DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t", "yes")  # Set to True to enable debug output
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # Maximum number of retries for HTTP requests
+RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))  # Initial delay between retries (seconds)
 
 # Rate limits
 RATE_LIMIT_WITH_TOKEN = 5000  # Requests per hour with token
@@ -151,8 +152,8 @@ CACHE_CONFIG: Dict[str, Any] = {
 
 # Error handling configuration
 ERROR_HANDLING_CONFIG: Dict[str, Any] = {
-    "max_retries": 3,
-    "retry_delay": 1,  # seconds
+    "max_retries": MAX_RETRIES,
+    "retry_delay": RETRY_DELAY,  # seconds
     "timeout": 30,  # seconds
     "handle_rate_limit": True,
     "handle_network_error": True,
@@ -168,7 +169,7 @@ OUTPUT_CONFIG: Dict[str, Any] = {
     "show_details": True,
     "show_warnings": True,
     "show_errors": True,
-    "show_debug": False,
+    "show_debug": DEBUG,
     "color_output": True,
     "format": "text",  # Options: text, json, csv
 } 

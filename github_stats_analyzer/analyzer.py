@@ -8,6 +8,7 @@ import httpx
 import json
 import csv
 import sys
+import os
 from typing import Dict, List, Optional, Set, Tuple, Any
 from datetime import datetime
 from rich.console import Console
@@ -137,21 +138,38 @@ class GitHubStatsAnalyzer:
         return filtered_repos
     
     async def process_repos(self, repos: List[Repository]):
-        """Process repositories to gather statistics.
+        """Process repositories.
         
         Args:
             repos: List of repositories to process
         """
-        logger.info(f"Processing {len(repos)} repositories")
+        # Get max_concurrent_repos from environment variable or use default
+        max_concurrent_repos = int(os.getenv("MAX_CONCURRENT_REPOS", MAX_CONCURRENT_REPOS))
         
-        # Create progress bar
+        # Create a semaphore to limit concurrent processing
+        semaphore = asyncio.Semaphore(max_concurrent_repos)
+        
+        # Process repositories concurrently with progress bar
         with TqdmProgressBar(total=len(repos), desc="Processing repositories") as progress:
-            # Process repositories in batches to avoid overwhelming the API
-            for i in range(0, len(repos), MAX_CONCURRENT_REPOS):
-                batch = repos[i:i+MAX_CONCURRENT_REPOS]
-                tasks = [self.process_repo(repo) for repo in batch]
-                await asyncio.gather(*tasks)
-                progress.update(len(batch))
+            tasks = []
+            for repo in repos:
+                task = asyncio.create_task(self._process_repo_with_semaphore(repo, semaphore, progress))
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks)
+    
+    async def _process_repo_with_semaphore(self, repo: Repository, semaphore: asyncio.Semaphore, progress):
+        """Process a repository with semaphore to limit concurrency.
+        
+        Args:
+            repo: Repository to process
+            semaphore: Semaphore to limit concurrency
+            progress: Progress bar
+        """
+        async with semaphore:
+            await self.process_repo(repo)
+            progress.update(1)
     
     async def process_repo(self, repo: Repository):
         """Process a single repository.

@@ -22,14 +22,19 @@ Options:
     --exclude-languages     Languages to exclude from statistics
     --max-repos             Maximum number of repositories to analyze
     --max-commits           Maximum number of commits to analyze per repository
+    --max-concurrent-repos  Maximum number of repositories to process concurrently
+    --max-retries           Maximum number of retries for HTTP requests
+    --retry-delay           Initial delay between retries in seconds
 """
 
 import asyncio
 import sys
+import os
 
 from github_stats_analyzer.logger import logger, configure_logger
 from github_stats_analyzer.cli import parse_args, validate_environment, handle_error
 from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
+from github_stats_analyzer.config import MAX_CONCURRENT_REPOS, MAX_RETRIES, RETRY_DELAY
 
 async def main_async():
     """Main entry point for the application."""
@@ -44,7 +49,19 @@ async def main_async():
     # Validate environment
     validate_environment(github_token)
     
+    # Update configuration from CLI arguments
+    max_concurrent_repos = args.max_concurrent_repos
+    max_retries = args.max_retries
+    retry_delay = args.retry_delay
+    
+    # Set environment variables for other modules to use
+    os.environ["MAX_CONCURRENT_REPOS"] = str(max_concurrent_repos)
+    os.environ["MAX_RETRIES"] = str(max_retries)
+    os.environ["RETRY_DELAY"] = str(retry_delay)
+    
     logger.info(f"Starting GitHub statistics analysis for user: {username}")
+    logger.info(f"Configuration: max_concurrent_repos={max_concurrent_repos}, max_retries={max_retries}, retry_delay={retry_delay}")
+    
     analyzer = GitHubStatsAnalyzer(
         username=username, 
         excluded_languages=excluded_languages, 

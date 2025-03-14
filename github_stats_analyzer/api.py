@@ -80,6 +80,10 @@ class GitHubAPIClient:
         """
         url = endpoint if endpoint.startswith("http") else f"{GITHUB_API_URL}/{endpoint}"
         
+        # Get max_retries and retry_delay from environment variables or use defaults
+        max_retries = int(os.getenv("MAX_RETRIES", MAX_RETRIES))
+        retry_delay = float(os.getenv("RETRY_DELAY", RETRY_DELAY))
+        
         # Check rate limit
         if self.rate_limit_remaining <= 1:
             now = datetime.now().timestamp()
@@ -89,7 +93,7 @@ class GitHubAPIClient:
                 await asyncio.sleep(wait_time)
         
         # Make the request with retries
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(max_retries):
             try:
                 self.request_count += 1
                 response = await getattr(self.client, method.lower())(url, **kwargs)
@@ -98,35 +102,45 @@ class GitHubAPIClient:
                 self.rate_limit_remaining = int(response.headers.get("X-RateLimit-Remaining", "1"))
                 self.rate_limit_reset = int(response.headers.get("X-RateLimit-Reset", "0"))
                 
-                # Check for rate limiting
-                if response.status_code == 403 and "rate limit exceeded" in response.text.lower():
-                    reset_time = int(response.headers.get("X-RateLimit-Reset", "0"))
+                # Check if rate limited
+                if response.status_code == 403 and "API rate limit exceeded" in response.text:
+                    reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
                     now = datetime.now().timestamp()
-                    wait_time = reset_time - now + 1
-                    
-                    if wait_time > 0:
-                        logger.warning(f"Rate limit exceeded. Waiting {wait_time:.1f} seconds.")
-                        await asyncio.sleep(wait_time)
-                        continue
+                    wait_time = max(reset_time - now + 1, 1)
+                    logger.warning(f"Rate limit exceeded. Waiting {wait_time:.1f} seconds.")
+                    await asyncio.sleep(wait_time)
+                    continue
                 
-                # Return response
+                # Handle successful response
                 if response.status_code < 400:
-                    return response.status_code, response.json() if response.content and response.content.strip() else None
-                else:
-                    logger.warning(f"GitHub API error: {response.status_code} - {response.text}")
+                    return response.status_code, response.json() if response.text else None
+                
+                # Handle error response
+                if response.status_code == 404:
+                    logger.error(f"Resource not found: {url}")
                     return response.status_code, None
-                    
-            except httpx.RequestError as e:
-                logger.error(f"Request error: {str(e)}")
+                
+                # Handle other errors with retry
+                logger.warning(f"Request failed with status {response.status_code}: {response.text}")
                 
                 # Exponential backoff
-                if attempt < MAX_RETRIES - 1:
-                    wait_time = RETRY_DELAY * (2 ** attempt)
-                    logger.info(f"Retrying in {wait_time:.1f} seconds...")
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.info(f"Retrying in {wait_time:.1f} seconds... (Attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"Failed after {MAX_RETRIES} attempts")
-                    return 0, None
+                
+            except (httpx.RequestError, httpx.TimeoutException) as e:
+                logger.warning(f"Request error: {str(e)}")
+                
+                # Exponential backoff
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.info(f"Retrying in {wait_time:.1f} seconds... (Attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+        
+        # If we get here, all retries failed
+        logger.error(f"All {max_retries} attempts failed for {url}")
+        return 500, None
     
     async def get_user_repos(self, username: str, include_private: bool = False) -> List[Repository]:
         """Get repositories for a user.
