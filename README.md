@@ -7,9 +7,9 @@
 *Read this in [中文 (Chinese)](README_CN.md).*
 
 This Python program analyzes a GitHub user's repositories to collect comprehensive statistics on:
-- 📈 Total additions and deletions across all repositories
+- 📈 Total additions and deletions across all repositories (including forks, but only counting user's own contributions)
 - 🔤 Lines of code per programming language
-- 📚 Detailed repository information (ignoring forked repositories)
+- 📚 Detailed repository information
 
 ![Example Output](./assets/sample_1.webp)
 ![Example Output](./assets/sample_2.webp)
@@ -18,7 +18,7 @@ This Python program analyzes a GitHub user's repositories to collect comprehensi
 
 - **Comprehensive Analysis**: Collects detailed statistics on code contributions
 - **Language Breakdown**: Shows distribution of code across programming languages
-- **Excludes Forks**: Only analyzes original repositories, not forks
+- **Smart Fork Analysis**: Analyzes all repositories including forks, but only counts user's own contributions
 - **Parallel Processing**: Efficiently processes multiple repositories concurrently
 - **Rich Output**: Beautiful console output with tables and colors
 - **Detailed Logging**: Comprehensive logging for debugging
@@ -105,7 +105,7 @@ The program will display:
 
 ## 📝 Notes
 
-- The program ignores forked repositories
+- The program analyzes all repositories including forks, but only counts the user's own contributions
 - GitHub API has rate limits, so analyzing users with many repositories might take time
 - Lines of code are estimated based on byte count (approximation)
 - Some languages are excluded by default to avoid skewing statistics (use `--include-all` to include them)

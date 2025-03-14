@@ -41,7 +41,7 @@ class GitHubStatsAnalyzer:
         await self.api_client.close()
         
     async def get_user_repos(self) -> List[Dict[str, Any]]:
-        """Get all repositories for the user (excluding forks)."""
+        """Get all repositories for the user (including forks)."""
         page = 1
         all_repos = []
         
@@ -61,13 +61,12 @@ class GitHubStatsAnalyzer:
                     logger.warning(f"Failed to fetch repositories page {page}: Status {status}")
                 break
                 
-            # Filter out forked repositories
-            non_fork_repos = [repo for repo in repos if not repo["fork"]]
-            logger.debug(f"Found {len(non_fork_repos)} non-forked repositories on page {page}")
-            all_repos.extend(non_fork_repos)
+            # Include all repositories (including forks)
+            logger.debug(f"Found {len(repos)} repositories on page {page}")
+            all_repos.extend(repos)
             page += 1
             
-        logger.info(f"Total non-forked repositories found: {len(all_repos)}")
+        logger.info(f"Total repositories found: {len(all_repos)}")
         return all_repos
 
     async def get_repo_commits(self, repo: Dict[str, Any]) -> Tuple[int, int]:
