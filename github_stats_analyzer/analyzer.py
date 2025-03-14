@@ -5,43 +5,73 @@ GitHub User Statistics Analyzer core functionality
 
 import asyncio
 from typing import Dict, List, Tuple, Any, Optional, Set, Union
+from datetime import datetime
 
 from rich.console import Console
 from rich.table import Table
 from rich import box
 from rich.panel import Panel
 from rich.text import Text
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich.syntax import Syntax
+from rich.layout import Layout
+from rich.live import Live
+from rich.align import Align
+from rich.style import Style
+from rich import print as rprint
 
-from config import GITHUB_API_URL, MAX_CONCURRENT_REPOS, EXCLUDED_LANGUAGES
+from config import GITHUB_API_URL, MAX_CONCURRENT_REPOS, EXCLUDED_LANGUAGES, ACCESS_LEVEL_CONFIG, REPO_LIMITS, COMMIT_LIMITS
 from logger import logger, TqdmProgressBar
 from models import RepoStats
-from api import GitHubApiClient
+from api import GitHubApiClient, AccessLevel
 from utils import is_code_file, should_exclude_repo, format_datetime
 
 class GitHubStatsAnalyzer:
-    def __init__(self, username: str, excluded_languages: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        username: str,
+        excluded_languages: Optional[Set[str]] = None,
+        access_level: str = AccessLevel.BASIC
+    ):
+        """Initialize the analyzer.
+        
+        Args:
+            username: GitHub username to analyze
+            excluded_languages: Set of languages to exclude from analysis
+            access_level: Access level to use (basic or full)
+        """
         self.username = username
-        self.api_client = GitHubApiClient()
-        self.repos: List[Dict[str, Any]] = []
-        self.language_stats: Dict[str, int] = {}
+        self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
+        self.access_level = access_level
+        self.config = ACCESS_LEVEL_CONFIG[access_level]
+        
+        # Initialize API client
+        self.api_client = GitHubApiClient(access_level)
+        
+        # Initialize statistics
         self.total_additions = 0
         self.total_deletions = 0
-        self.code_additions = 0  # Additions in code files only
-        self.code_deletions = 0  # Deletions in code files only
-        self.filtered_additions = 0  # Additions excluding certain languages
-        self.filtered_deletions = 0  # Deletions excluding certain languages
-        self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)  # Limit concurrent repository processing
-        self.failed_repos = []  # Track repos that failed to fetch stats
-        self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
-        self.repo_language_stats: Dict[str, Dict[str, int]] = {}  # Track language stats per repo
-        self.repo_stats: Dict[str, RepoStats] = {}  # Detailed stats for each repo
+        self.code_additions = 0
+        self.code_deletions = 0
+        self.filtered_additions = 0
+        self.filtered_deletions = 0
+        self.language_stats: Dict[str, int] = {}
+        self.repo_language_stats: Dict[str, Dict[str, int]] = {}
+        self.repo_stats: Dict[str, RepoStats] = {}
+        self.failed_repos: List[str] = []
+        
+        # Initialize repositories list
+        self.repos: List[Dict[str, Any]] = []
+        
+        # Create semaphore for limiting concurrent repository processing
+        self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)
         
     async def close(self):
-        """Close the API client."""
+        """Close the analyzer and its resources."""
         await self.api_client.close()
         
     async def get_user_repos(self) -> List[Dict[str, Any]]:
-        """Get all repositories for the user (including forks)."""
+        """Get all repositories for the user."""
         page = 1
         all_repos = []
         
@@ -52,8 +82,13 @@ class GitHubStatsAnalyzer:
             
             status, repos = await self.api_client.github_request(
                 "get",
-                f"{GITHUB_API_URL}/users/{self.username}/repos",
-                params={"page": page, "per_page": 100}
+                f"users/{self.username}/repos",
+                params={
+                    "page": page,
+                    "per_page": 100,
+                    "sort": "updated",
+                    "direction": "desc"
+                }
             )
             
             if status != 200 or not repos:
@@ -61,9 +96,22 @@ class GitHubStatsAnalyzer:
                     logger.warning(f"Failed to fetch repositories page {page}: Status {status}")
                 break
                 
-            # Include all repositories (including forks)
-            logger.debug(f"Found {len(repos)} repositories on page {page}")
-            all_repos.extend(repos)
+            # Apply access level filters
+            filtered_repos = []
+            for repo in repos:
+                if self.config["include_forks"] or not repo["fork"]:
+                    if self.config["include_private"] or not repo["private"]:
+                        if self.config["include_archived"] or not repo["archived"]:
+                            filtered_repos.append(repo)
+                            
+            logger.debug(f"Found {len(filtered_repos)} repositories on page {page}")
+            all_repos.extend(filtered_repos)
+            
+            # Check if we've reached the limit for basic access
+            if self.access_level == AccessLevel.BASIC and len(all_repos) >= REPO_LIMITS[AccessLevel.BASIC]:
+                all_repos = all_repos[:REPO_LIMITS[AccessLevel.BASIC]]
+                break
+                
             page += 1
             
         logger.info(f"Total repositories found: {len(all_repos)}")
@@ -75,6 +123,7 @@ class GitHubStatsAnalyzer:
         additions = 0
         deletions = 0
         page = 1
+        commit_count = 0
         
         logger.debug(f"Analyzing commits for repository: {repo_name}")
         
@@ -84,8 +133,12 @@ class GitHubStatsAnalyzer:
                 
                 status, commits = await self.api_client.github_request(
                     "get",
-                    f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits",
-                    params={"page": page, "per_page": 100, "author": self.username}
+                    f"repos/{self.username}/{repo_name}/commits",
+                    params={
+                        "page": page,
+                        "per_page": 100,
+                        "author": self.username
+                    }
                 )
                 
                 if status != 200 or not commits:
@@ -95,8 +148,16 @@ class GitHubStatsAnalyzer:
                     
                 logger.debug(f"Found {len(commits)} commits on page {page} for {repo_name}")
                 
+                # Check commit limit for basic access
+                if self.access_level == AccessLevel.BASIC:
+                    remaining_limit = COMMIT_LIMITS[AccessLevel.BASIC] - commit_count
+                    if remaining_limit <= 0:
+                        break
+                    commits = commits[:remaining_limit]
+                    
                 # Process each commit
                 for commit in commits:
+                    commit_count += 1
                     sha = commit.get("sha")
                     if not sha:
                         continue
@@ -106,7 +167,7 @@ class GitHubStatsAnalyzer:
                     
                     status, commit_data = await self.api_client.github_request(
                         "get",
-                        f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits/{sha}"
+                        f"repos/{self.username}/{repo_name}/commits/{sha}"
                     )
                     
                     if status != 200 or not commit_data:
@@ -161,7 +222,7 @@ class GitHubStatsAnalyzer:
         # First, get a list of all files in the repository to check which ones are code files
         status, repo_contents = await self.api_client.github_request(
             "get",
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/git/trees/HEAD?recursive=1"
+            f"repos/{self.username}/{repo_name}/git/trees/HEAD?recursive=1"
         )
         
         code_files = set()
@@ -178,7 +239,7 @@ class GitHubStatsAnalyzer:
         # Now get the contributor stats
         status, stats = await self.api_client.github_request(
             "get",
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
+            f"repos/{self.username}/{repo_name}/stats/contributors"
         )
         
         if status != 200 or not stats:
@@ -229,21 +290,24 @@ class GitHubStatsAnalyzer:
         
         status, languages = await self.api_client.github_request(
             "get",
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
+            f"repos/{self.username}/{repo_name}/languages"
         )
         
         if status != 200 or not languages:
             logger.warning(f"Error fetching languages for {repo_name}: {status}")
             return {}
             
-        logger.debug(f"Repository {repo_name} languages: {list(languages.keys())}")
+        logger.debug(f"Found languages for {repo_name}: {list(languages.keys())}")
         return languages
     
     async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, int, int, Dict[str, int]]:
-        """Process a single repository to get stats and languages.
+        """Process a single repository.
         
-        This method processes each repository sequentially (stats then languages),
-        but different repositories can be processed concurrently.
+        Args:
+            repo: Repository information dictionary
+            
+        Returns:
+            Tuple of (total_additions, total_deletions, code_additions, code_deletions, languages)
         """
         # Use semaphore to limit concurrent repository processing
         async with self.repo_semaphore:
@@ -289,7 +353,7 @@ class GitHubStatsAnalyzer:
         
         status, stats = await self.api_client.github_request(
             "get",
-            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
+            f"repos/{self.username}/{repo_name}/stats/contributors"
         )
         
         if status != 200 or not stats:
@@ -314,9 +378,9 @@ class GitHubStatsAnalyzer:
         """Analyze all repositories for the user."""
         logger.info(f"Starting analysis for GitHub user: {self.username}")
         
-        # Get all non-fork repositories
+        # Get all repositories
         self.repos = await self.get_user_repos()
-        logger.info(f"Found {len(self.repos)} non-forked repositories")
+        logger.info(f"Found {len(self.repos)} repositories")
         
         if not self.repos:
             logger.warning("No repositories to analyze.")
@@ -371,143 +435,111 @@ class GitHubStatsAnalyzer:
         logger.info("Analysis complete")
     
     def print_results(self):
-        """Print the analysis results."""
-        logger.info("Generating results report")
-        
-        # Create a rich console for pretty output
+        """Print the analysis results in a formatted way."""
         console = Console()
         
-        # Create a header panel
+        # Create layout
+        layout = Layout()
+        layout.split(
+            Layout(name="header", size=3),
+            Layout(name="body"),
+            Layout(name="footer", size=3)
+        )
+        
+        # Header
         header = Panel(
-            f"[bold cyan]GitHub Statistics for: [green]{self.username}[/green][/bold cyan]",
-            border_style="cyan",
-            expand=False
+            Text(f"GitHub Statistics for {self.username}", style="bold cyan"),
+            style="bold white"
         )
-        console.print("\n")
-        console.print(header)
+        layout["header"].update(header)
         
-        # Create a summary table for overall stats
-        summary_table = Table(title="Summary Statistics", box=box.ROUNDED, title_style="bold magenta")
-        summary_table.add_column("Category", style="cyan")
-        summary_table.add_column("Additions", style="green")
-        summary_table.add_column("Deletions", style="red")
-        summary_table.add_column("Net Change", style="yellow")
-        
-        # Add rows to summary table
-        summary_table.add_row(
-            "Total Changes (All Files)",
-            f"{self.total_additions:,}",
-            f"{self.total_deletions:,}",
-            f"{self.total_additions - self.total_deletions:,}"
-        )
-        summary_table.add_row(
-            "Code Changes (Code Files Only)",
-            f"{self.code_additions:,}",
-            f"{self.code_deletions:,}",
-            f"{self.code_additions - self.code_deletions:,}"
+        # Body
+        body = Layout()
+        body.split_row(
+            Layout(name="left"),
+            Layout(name="right")
         )
         
-        excluded_langs = ", ".join(sorted(self.excluded_languages))
-        filtered_row_name = f"Filtered Code Changes\n(excluding {excluded_langs})"
-        summary_table.add_row(
-            filtered_row_name,
-            f"{self.filtered_additions:,}",
-            f"{self.filtered_deletions:,}",
-            f"{self.filtered_additions - self.filtered_deletions:,}"
-        )
+        # Left side - Summary
+        summary_table = Table(title="Summary", show_header=True, header_style="bold cyan")
+        summary_table.add_column("Metric", style="cyan")
+        summary_table.add_column("Value", justify="right", style="green")
         
-        console.print(summary_table)
+        summary_table.add_row("Total Repositories", str(len(self.repos)))
+        summary_table.add_row("Total Additions", str(self.total_additions))
+        summary_table.add_row("Total Deletions", str(self.total_deletions))
+        summary_table.add_row("Net Change", str(self.total_additions - self.total_deletions))
+        summary_table.add_row("Code Additions", str(self.code_additions))
+        summary_table.add_row("Code Deletions", str(self.code_deletions))
+        summary_table.add_row("Code Net Change", str(self.code_additions - self.code_deletions))
+        
+        body["left"].update(Panel(summary_table, title="Summary Statistics"))
+        
+        # Right side - Language Breakdown
+        if self.language_stats:
+            lang_table = Table(title="Language Breakdown", show_header=True, header_style="bold cyan")
+            lang_table.add_column("Language", style="cyan")
+            lang_table.add_column("Lines", justify="right", style="green")
+            
+            # Sort languages by lines of code
+            sorted_langs = sorted(
+                self.language_stats.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            
+            for lang, bytes_count in sorted_langs:
+                # Convert bytes to approximate lines (assuming average of 4 bytes per character)
+                approx_lines = bytes_count // 4
+                lang_table.add_row(lang, f"{approx_lines:,}")
+                
+            body["right"].update(Panel(lang_table, title="Language Statistics"))
+        
+        layout["body"].update(body)
+        
+        # Footer
+        footer = Panel(
+            Text(f"Analysis completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style="bold green"),
+            style="bold white"
+        )
+        layout["footer"].update(footer)
+        
+        # Print the layout
+        console.print(layout)
+        
+        # Print repository details if in full access mode
+        if self.access_level == AccessLevel.FULL and self.config["show_details"]:
+            repo_table = Table(title="Repository Details", show_header=True, header_style="bold cyan")
+            repo_table.add_column("Repository", style="cyan")
+            repo_table.add_column("Stars", justify="right", style="green")
+            repo_table.add_column("Created", style="yellow")
+            repo_table.add_column("Additions", justify="right", style="green")
+            repo_table.add_column("Deletions", justify="right", style="red")
+            repo_table.add_column("Net Change", justify="right", style="blue")
+            
+            # Sort repositories by stars
+            sorted_repos = sorted(
+                self.repo_stats.items(),
+                key=lambda x: x[1].stars,
+                reverse=True
+            )
+            
+            for repo_name, stats in sorted_repos:
+                if not stats.excluded:
+                    repo_table.add_row(
+                        repo_name,
+                        str(stats.stars),
+                        stats.created_at,
+                        str(stats.additions),
+                        str(stats.deletions),
+                        str(stats.net_change)
+                    )
+                    
+            console.print(repo_table)
         
         # Print failed repos if any
         if self.failed_repos:
             console.print(f"\n[bold yellow]Note:[/bold yellow] Could not fetch complete stats for {len(self.failed_repos)} repositories.")
             logger.warning(f"Failed repositories: {', '.join(self.failed_repos)}")
-        
-        # Create a language statistics table
-        lang_table = Table(title="Language Statistics (sorted by lines of code)", box=box.ROUNDED, title_style="bold magenta")
-        lang_table.add_column("Language", style="cyan")
-        lang_table.add_column("Bytes", justify="right", style="green")
-        lang_table.add_column("Percentage", justify="right", style="yellow")
-        lang_table.add_column("Est. Lines", justify="right", style="blue")
-        
-        # Sort languages by bytes count
-        sorted_languages = sorted(
-            self.language_stats.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )
-        
-        # Calculate total bytes to get percentages
-        total_bytes = sum(self.language_stats.values())
-        
-        # Add rows to language table
-        for language, bytes_count in sorted_languages:
-            # Approximate lines of code (very rough estimate)
-            lines_estimate = bytes_count // 30
-            percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
-            
-            # Mark excluded languages
-            if language in self.excluded_languages:
-                lang_name = f"{language} [italic red](excluded)[/italic red]"
-            else:
-                lang_name = language
-                
-            lang_table.add_row(
-                lang_name,
-                f"{bytes_count:,}",
-                f"{percentage:.1f}%",
-                f"{lines_estimate:,}"
-            )
-        
-        console.print(lang_table)
-        
-        # Create a repository statistics table
-        repo_table = Table(
-            title="Detailed Repository Statistics (sorted by code net change)", 
-            box=box.ROUNDED, 
-            title_style="bold magenta"
-        )
-        repo_table.add_column("Repository", style="cyan")
-        repo_table.add_column("Total +/-", style="green")
-        repo_table.add_column("Code +/-", style="blue")
-        repo_table.add_column("Stars", justify="right", style="yellow")
-        repo_table.add_column("Created", style="magenta")
-        repo_table.add_column("Languages", style="cyan")
-        
-        # Sort repositories by code net change
-        sorted_repos = sorted(
-            self.repo_stats.values(),
-            key=lambda x: x.code_net_change,
-            reverse=True
-        )
-        
-        # Add rows to repository table
-        for repo in sorted_repos:
-            # Get top 3 languages
-            top_languages = []
-            if repo.languages:
-                sorted_repo_langs = sorted(repo.languages.items(), key=lambda x: x[1], reverse=True)
-                top_languages = [lang for lang, _ in sorted_repo_langs[:3]]
-            
-            # Format repository name with excluded mark if needed
-            if repo.excluded:
-                repo_name = f"{repo.name} [italic red]*[/italic red]"
-            else:
-                repo_name = repo.name
-                
-            repo_table.add_row(
-                repo_name,
-                f"+{repo.additions:,}/-{repo.deletions:,}",
-                f"+{repo.code_additions:,}/-{repo.code_deletions:,}",
-                f"{repo.stars}",
-                repo.created_at,
-                ", ".join(top_languages)
-            )
-        
-        console.print(repo_table)
-        
-        # Print note about excluded repositories
-        if any(repo.excluded for repo in self.repo_stats.values()):
-            console.print("\n[italic red]*[/italic red] Repositories excluded from filtered statistics due to high percentage of excluded languages")
         
         console.print(f"\nTotal GitHub API Requests: [bold]{self.api_client.request_count}[/bold]") 
