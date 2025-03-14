@@ -38,7 +38,7 @@ HEADERS = {
 }
 
 # Configuration
-MAX_CONCURRENT_REQUESTS = 5  # Maximum number of concurrent requests to GitHub API
+MAX_CONCURRENT_REPOS = 5  # Maximum number of repositories to process concurrently
 DEBUG = False  # Set to True to enable debug output
 
 # Configure loguru logger
@@ -54,7 +54,7 @@ class GitHubStatsAnalyzer:
         self.language_stats: Dict[str, int] = {}
         self.total_additions = 0
         self.total_deletions = 0
-        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)  # Rate limiting semaphore
+        self.repo_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REPOS)  # Limit concurrent repository processing
         self.failed_repos = []  # Track repos that failed to fetch stats
         
     async def close(self):
@@ -91,150 +91,154 @@ class GitHubStatsAnalyzer:
     
     async def get_repo_commits(self, repo: Dict[str, Any]) -> Tuple[int, int]:
         """Get additions and deletions by analyzing individual commits."""
-        async with self.semaphore:  # Limit concurrent requests
-            repo_name = repo["name"]
-            additions = 0
-            deletions = 0
-            page = 1
-            
-            logger.debug(f"Analyzing commits for repository: {repo_name}")
-            
-            try:
-                while True:
-                    logger.trace(f"Fetching page {page} of commits for {repo_name}")
-                    response = await self.client.get(
-                        f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits",
-                        params={"page": page, "per_page": 100, "author": self.username}
+        repo_name = repo["name"]
+        additions = 0
+        deletions = 0
+        page = 1
+        
+        logger.debug(f"Analyzing commits for repository: {repo_name}")
+        
+        try:
+            while True:
+                logger.trace(f"Fetching page {page} of commits for {repo_name}")
+                response = await self.client.get(
+                    f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits",
+                    params={"page": page, "per_page": 100, "author": self.username}
+                )
+                
+                if response.status_code != 200:
+                    logger.warning(f"Error fetching commits for {repo_name}: {response.status_code}")
+                    break
+                    
+                commits = response.json()
+                if not commits:
+                    logger.debug(f"No more commits found for {repo_name} on page {page}")
+                    break
+                    
+                logger.debug(f"Found {len(commits)} commits on page {page} for {repo_name}")
+                
+                # Process each commit
+                for commit in commits:
+                    sha = commit.get("sha")
+                    if not sha:
+                        continue
+                        
+                    # Get commit details
+                    logger.trace(f"Fetching details for commit {sha[:7]} in {repo_name}")
+                    commit_response = await self.client.get(
+                        f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits/{sha}"
                     )
                     
-                    if response.status_code != 200:
-                        logger.warning(f"Error fetching commits for {repo_name}: {response.status_code}")
-                        break
+                    if commit_response.status_code != 200:
+                        logger.warning(f"Failed to fetch details for commit {sha[:7]}: {commit_response.status_code}")
+                        continue
                         
-                    commits = response.json()
-                    if not commits:
-                        logger.debug(f"No more commits found for {repo_name} on page {page}")
-                        break
-                        
-                    logger.debug(f"Found {len(commits)} commits on page {page} for {repo_name}")
+                    commit_data = commit_response.json()
+                    stats = commit_data.get("stats", {})
                     
-                    # Process each commit
-                    for commit in commits:
-                        sha = commit.get("sha")
-                        if not sha:
-                            continue
-                            
-                        # Get commit details
-                        logger.trace(f"Fetching details for commit {sha[:7]} in {repo_name}")
-                        commit_response = await self.client.get(
-                            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/commits/{sha}"
-                        )
-                        
-                        if commit_response.status_code != 200:
-                            logger.warning(f"Failed to fetch details for commit {sha[:7]}: {commit_response.status_code}")
-                            continue
-                            
-                        commit_data = commit_response.json()
-                        stats = commit_data.get("stats", {})
-                        
-                        commit_additions = stats.get("additions", 0)
-                        commit_deletions = stats.get("deletions", 0)
-                        additions += commit_additions
-                        deletions += commit_deletions
-                        
-                        logger.trace(f"Commit {sha[:7]}: +{commit_additions}, -{commit_deletions}")
-                        
-                    page += 1
+                    commit_additions = stats.get("additions", 0)
+                    commit_deletions = stats.get("deletions", 0)
+                    additions += commit_additions
+                    deletions += commit_deletions
                     
-                    # Avoid rate limiting
-                    await asyncio.sleep(0.1)
+                    logger.trace(f"Commit {sha[:7]}: +{commit_additions}, -{commit_deletions}")
                     
-                logger.debug(f"Repository {repo_name} commit analysis complete: +{additions}, -{deletions}")
-                return additions, deletions
+                page += 1
                 
-            except Exception as e:
-                logger.error(f"Error processing commits for {repo_name}: {str(e)}")
-                return 0, 0
+                # Avoid rate limiting
+                await asyncio.sleep(0.1)
+                
+            logger.debug(f"Repository {repo_name} commit analysis complete: +{additions}, -{deletions}")
+            return additions, deletions
+            
+        except Exception as e:
+            logger.error(f"Error processing commits for {repo_name}: {str(e)}")
+            return 0, 0
     
     async def get_repo_stats(self, repo: Dict[str, Any]) -> Tuple[int, int]:
         """Get additions and deletions for a repository using stats/contributors endpoint."""
-        async with self.semaphore:  # Limit concurrent requests
-            repo_name = repo["name"]
-            logger.debug(f"Fetching stats for repository: {repo_name}")
+        repo_name = repo["name"]
+        logger.debug(f"Fetching stats for repository: {repo_name}")
+        
+        response = await self.client.get(
+            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
+        )
+        
+        # GitHub sometimes returns 202 while computing stats
+        if response.status_code == 202:
+            logger.info(f"GitHub is computing stats for {repo_name}, waiting and retrying...")
+            # Wait and retry
+            await asyncio.sleep(2)
+            return await self.get_repo_stats(repo)
+        
+        if response.status_code != 200:
+            logger.warning(f"Error fetching stats for {repo_name}: {response.status_code}")
+            self.failed_repos.append(repo_name)
+            # Fall back to commit analysis
+            logger.info(f"Falling back to commit analysis for {repo_name}")
+            return await self.get_repo_commits(repo)
             
-            response = await self.client.get(
-                f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/stats/contributors"
-            )
+        stats = response.json()
+        if not stats:
+            logger.warning(f"No stats returned for {repo_name}, falling back to commit analysis")
+            return await self.get_repo_commits(repo)
             
-            # GitHub sometimes returns 202 while computing stats
-            if response.status_code == 202:
-                logger.info(f"GitHub is computing stats for {repo_name}, waiting and retrying...")
-                # Wait and retry
-                await asyncio.sleep(2)
-                return await self.get_repo_stats(repo)
-            
-            if response.status_code != 200:
-                logger.warning(f"Error fetching stats for {repo_name}: {response.status_code}")
-                self.failed_repos.append(repo_name)
-                # Fall back to commit analysis
-                logger.info(f"Falling back to commit analysis for {repo_name}")
-                return await self.get_repo_commits(repo)
+        additions = 0
+        deletions = 0
+        
+        # Find the user's contributions
+        user_found = False
+        for contributor in stats:
+            if contributor.get("author", {}).get("login", "").lower() == self.username.lower():
+                user_found = True
+                for week in contributor.get("weeks", []):
+                    additions += week.get("a", 0)
+                    deletions += week.get("d", 0)
+                break
+        
+        # If user not found in contributors, fall back to commit analysis
+        if not user_found:
+            logger.warning(f"User not found in contributors for {repo_name}, falling back to commit analysis")
+            return await self.get_repo_commits(repo)
                 
-            stats = response.json()
-            if not stats:
-                logger.warning(f"No stats returned for {repo_name}, falling back to commit analysis")
-                return await self.get_repo_commits(repo)
-                
-            additions = 0
-            deletions = 0
-            
-            # Find the user's contributions
-            user_found = False
-            for contributor in stats:
-                if contributor.get("author", {}).get("login", "").lower() == self.username.lower():
-                    user_found = True
-                    for week in contributor.get("weeks", []):
-                        additions += week.get("a", 0)
-                        deletions += week.get("d", 0)
-                    break
-            
-            # If user not found in contributors, fall back to commit analysis
-            if not user_found:
-                logger.warning(f"User not found in contributors for {repo_name}, falling back to commit analysis")
-                return await self.get_repo_commits(repo)
-                    
-            logger.debug(f"Repository {repo_name} stats: +{additions}, -{deletions}")
-            return additions, deletions
+        logger.debug(f"Repository {repo_name} stats: +{additions}, -{deletions}")
+        return additions, deletions
     
     async def get_repo_languages(self, repo: Dict[str, Any]) -> Dict[str, int]:
         """Get language breakdown for a repository."""
-        async with self.semaphore:  # Limit concurrent requests
-            repo_name = repo["name"]
-            logger.debug(f"Fetching languages for repository: {repo_name}")
+        repo_name = repo["name"]
+        logger.debug(f"Fetching languages for repository: {repo_name}")
+        
+        response = await self.client.get(
+            f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
+        )
+        
+        if response.status_code != 200:
+            logger.warning(f"Error fetching languages for {repo_name}: {response.status_code}")
+            return {}
             
-            response = await self.client.get(
-                f"{GITHUB_API_URL}/repos/{self.username}/{repo_name}/languages"
-            )
-            
-            if response.status_code != 200:
-                logger.warning(f"Error fetching languages for {repo_name}: {response.status_code}")
-                return {}
-                
-            languages = response.json()
-            logger.debug(f"Repository {repo_name} languages: {list(languages.keys())}")
-            return languages
+        languages = response.json()
+        logger.debug(f"Repository {repo_name} languages: {list(languages.keys())}")
+        return languages
     
     async def process_repo(self, repo: Dict[str, Any]) -> Tuple[int, int, Dict[str, int]]:
-        """Process a single repository to get stats and languages."""
-        repo_name = repo["name"]
-        logger.info(f"Processing repository: {repo_name}")
-            
-        additions, deletions = await self.get_repo_stats(repo)
-        languages = await self.get_repo_languages(repo)
+        """Process a single repository to get stats and languages.
         
-        logger.info(f"Repository {repo_name} complete: +{additions}, -{deletions}, languages: {list(languages.keys())}")
+        This method processes each repository sequentially (stats then languages),
+        but different repositories can be processed concurrently.
+        """
+        # Use semaphore to limit concurrent repository processing
+        async with self.repo_semaphore:
+            repo_name = repo["name"]
+            logger.info(f"Processing repository: {repo_name}")
+                
+            # Process repository sequentially (stats then languages)
+            additions, deletions = await self.get_repo_stats(repo)
+            languages = await self.get_repo_languages(repo)
             
-        return additions, deletions, languages
+            logger.info(f"Repository {repo_name} complete: +{additions}, -{deletions}, languages: {list(languages.keys())}")
+                
+            return additions, deletions, languages
     
     async def analyze(self):
         """Analyze all repositories for the user."""
@@ -251,6 +255,7 @@ class GitHubStatsAnalyzer:
         # Create tasks for all repositories
         tasks = []
         for repo in self.repos:
+            # Each task will acquire the semaphore in process_repo
             tasks.append(self.process_repo(repo))
         
         # Process repositories in parallel with progress bar
@@ -264,8 +269,8 @@ class GitHubStatsAnalyzer:
             # Create tasks with progress tracking
             progress_tasks = [process_with_progress(task) for task in tasks]
             
-            # Execute all tasks concurrently and gather results
-            logger.info(f"Starting parallel processing of {len(tasks)} repositories")
+            # Execute all tasks concurrently (limited by semaphore) and gather results
+            logger.info(f"Starting parallel processing of {len(tasks)} repositories (max {MAX_CONCURRENT_REPOS} at a time)")
             results = await asyncio.gather(*progress_tasks, return_exceptions=True)
             
             # Process results
