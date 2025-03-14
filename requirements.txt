@@ -2,3 +2,4 @@ httpx
 tqdm
 python-dotenv
 loguru
+rich

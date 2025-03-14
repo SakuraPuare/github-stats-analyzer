@@ -27,6 +27,11 @@ import httpx
 from tqdm import tqdm
 from dotenv import load_dotenv
 from loguru import logger
+from rich.console import Console
+from rich.table import Table
+from rich import box
+from rich.panel import Panel
+from rich.text import Text
 
 # Load environment variables
 load_dotenv()
@@ -601,31 +606,61 @@ class GitHubStatsAnalyzer:
         """Print the analysis results."""
         logger.info("Generating results report")
         
-        print("\n" + "="*50)
-        print(f"GitHub Statistics for: {self.username}")
-        print("="*50)
+        # Create a rich console for pretty output
+        console = Console()
         
-        print("\nTotal Changes (All Files):")
-        print(f"  Additions: {self.total_additions:,}")
-        print(f"  Deletions: {self.total_deletions:,}")
-        print(f"  Net Change: {self.total_additions - self.total_deletions:,}")
+        # Create a header panel
+        header = Panel(
+            f"[bold cyan]GitHub Statistics for: [green]{self.username}[/green][/bold cyan]",
+            border_style="cyan",
+            expand=False
+        )
+        console.print("\n")
+        console.print(header)
         
-        print("\nCode Changes (Code Files Only):")
-        print(f"  Additions: {self.code_additions:,}")
-        print(f"  Deletions: {self.code_deletions:,}")
-        print(f"  Net Change: {self.code_additions - self.code_deletions:,}")
+        # Create a summary table for overall stats
+        summary_table = Table(title="Summary Statistics", box=box.ROUNDED, title_style="bold magenta")
+        summary_table.add_column("Category", style="cyan")
+        summary_table.add_column("Additions", style="green")
+        summary_table.add_column("Deletions", style="red")
+        summary_table.add_column("Net Change", style="yellow")
         
-        print(f"\nFiltered Code Changes (excluding {', '.join(sorted(self.excluded_languages))}):")
-        print(f"  Additions: {self.filtered_additions:,}")
-        print(f"  Deletions: {self.filtered_deletions:,}")
-        print(f"  Net Change: {self.filtered_additions - self.filtered_deletions:,}")
+        # Add rows to summary table
+        summary_table.add_row(
+            "Total Changes (All Files)",
+            f"{self.total_additions:,}",
+            f"{self.total_deletions:,}",
+            f"{self.total_additions - self.total_deletions:,}"
+        )
+        summary_table.add_row(
+            "Code Changes (Code Files Only)",
+            f"{self.code_additions:,}",
+            f"{self.code_deletions:,}",
+            f"{self.code_additions - self.code_deletions:,}"
+        )
         
+        excluded_langs = ", ".join(sorted(self.excluded_languages))
+        filtered_row_name = f"Filtered Code Changes\n(excluding {excluded_langs})"
+        summary_table.add_row(
+            filtered_row_name,
+            f"{self.filtered_additions:,}",
+            f"{self.filtered_deletions:,}",
+            f"{self.filtered_additions - self.filtered_deletions:,}"
+        )
+        
+        console.print(summary_table)
+        
+        # Print failed repos if any
         if self.failed_repos:
-            print(f"\nNote: Could not fetch complete stats for {len(self.failed_repos)} repositories.")
+            console.print(f"\n[bold yellow]Note:[/bold yellow] Could not fetch complete stats for {len(self.failed_repos)} repositories.")
             logger.warning(f"Failed repositories: {', '.join(self.failed_repos)}")
         
-        print("\nLanguage Statistics (sorted by lines of code):")
-        print("-"*50)
+        # Create a language statistics table
+        lang_table = Table(title="Language Statistics (sorted by lines of code)", box=box.ROUNDED, title_style="bold magenta")
+        lang_table.add_column("Language", style="cyan")
+        lang_table.add_column("Bytes", justify="right", style="green")
+        lang_table.add_column("Percentage", justify="right", style="yellow")
+        lang_table.add_column("Est. Lines", justify="right", style="blue")
         
         # Sort languages by bytes count
         sorted_languages = sorted(
@@ -637,21 +672,39 @@ class GitHubStatsAnalyzer:
         # Calculate total bytes to get percentages
         total_bytes = sum(self.language_stats.values())
         
-        # Print language statistics
+        # Add rows to language table
         for language, bytes_count in sorted_languages:
             # Approximate lines of code (very rough estimate)
             lines_estimate = bytes_count // 30
             percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
             
             # Mark excluded languages
-            excluded_mark = " (excluded)" if language in self.excluded_languages else ""
-            print(f"{language:<15}{excluded_mark}: {bytes_count:,} bytes ({percentage:.1f}%) ≈ {lines_estimate:,} lines")
+            if language in self.excluded_languages:
+                lang_name = f"{language} [italic red](excluded)[/italic red]"
+            else:
+                lang_name = language
+                
+            lang_table.add_row(
+                lang_name,
+                f"{bytes_count:,}",
+                f"{percentage:.1f}%",
+                f"{lines_estimate:,}"
+            )
         
-        # Print detailed repository statistics
-        print("\nDetailed Repository Statistics (sorted by code net change):")
-        print("-"*120)
-        print(f"{'Repository':<25} | {'Total +/-':<20} | {'Code +/-':<20} | {'Stars':>5} | {'Created':>10} | {'Languages':<20}")
-        print("-"*120)
+        console.print(lang_table)
+        
+        # Create a repository statistics table
+        repo_table = Table(
+            title="Detailed Repository Statistics (sorted by code net change)", 
+            box=box.ROUNDED, 
+            title_style="bold magenta"
+        )
+        repo_table.add_column("Repository", style="cyan")
+        repo_table.add_column("Total +/-", style="green")
+        repo_table.add_column("Code +/-", style="blue")
+        repo_table.add_column("Stars", justify="right", style="yellow")
+        repo_table.add_column("Created", style="magenta")
+        repo_table.add_column("Languages", style="cyan")
         
         # Sort repositories by code net change
         sorted_repos = sorted(
@@ -660,6 +713,7 @@ class GitHubStatsAnalyzer:
             reverse=True
         )
         
+        # Add rows to repository table
         for repo in sorted_repos:
             # Get top 3 languages
             top_languages = []
@@ -667,13 +721,28 @@ class GitHubStatsAnalyzer:
                 sorted_repo_langs = sorted(repo.languages.items(), key=lambda x: x[1], reverse=True)
                 top_languages = [lang for lang, _ in sorted_repo_langs[:3]]
             
-            excluded_mark = " *" if repo.excluded else ""
-            print(f"{repo.name:<23}{excluded_mark} | +{repo.additions:>8,}/-{repo.deletions:<8,} | +{repo.code_additions:>8,}/-{repo.code_deletions:<8,} | {repo.stars:>5} | {repo.created_at:>10} | {', '.join(top_languages):<20}")
+            # Format repository name with excluded mark if needed
+            if repo.excluded:
+                repo_name = f"{repo.name} [italic red]*[/italic red]"
+            else:
+                repo_name = repo.name
+                
+            repo_table.add_row(
+                repo_name,
+                f"+{repo.additions:,}/-{repo.deletions:,}",
+                f"+{repo.code_additions:,}/-{repo.code_deletions:,}",
+                f"{repo.stars}",
+                repo.created_at,
+                ", ".join(top_languages)
+            )
         
+        console.print(repo_table)
+        
+        # Print note about excluded repositories
         if any(repo.excluded for repo in self.repo_stats.values()):
-            print("\n* Repositories excluded from filtered statistics due to high percentage of excluded languages")
+            console.print("\n[italic red]*[/italic red] Repositories excluded from filtered statistics due to high percentage of excluded languages")
         
-        print(f"\nTotal GitHub API Requests: {self.request_count}")
+        console.print(f"\nTotal GitHub API Requests: [bold]{self.request_count}[/bold]")
 
 async def main():
     if len(sys.argv) < 2:
