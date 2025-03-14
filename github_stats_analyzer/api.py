@@ -110,7 +110,7 @@ class GitHubAPIClient:
                 
                 # Return response
                 if response.status_code < 400:
-                    return response.status_code, response.json() if response.content else None
+                    return response.status_code, response.json() if response.content and response.content.strip() else None
                 else:
                     logger.warning(f"GitHub API error: {response.status_code} - {response.text}")
                     return response.status_code, None

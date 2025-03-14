@@ -53,11 +53,11 @@ def should_exclude_repo(repo_name: str, languages: Dict[str, int], excluded_lang
         
     return False
 
-def format_datetime(dt: Optional[datetime], output_format: str = "%Y-%m-%d") -> str:
-    """Format a datetime object to a string.
+def format_datetime(dt: Optional[datetime | str], output_format: str = "%Y-%m-%d") -> str:
+    """Format a datetime object or string to a string.
     
     Args:
-        dt: Datetime object to format
+        dt: Datetime object or string to format
         output_format: Output format string
         
     Returns:
@@ -67,6 +67,11 @@ def format_datetime(dt: Optional[datetime], output_format: str = "%Y-%m-%d") -> 
         return "Unknown"
         
     try:
+        # If dt is already a string, return it directly
+        if isinstance(dt, str):
+            return dt
+        
+        # If dt is a datetime object, format it
         return dt.strftime(output_format)
     except Exception as e:
         logger.warning(f"Could not format date: {e}")

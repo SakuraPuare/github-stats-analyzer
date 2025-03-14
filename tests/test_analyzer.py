@@ -61,7 +61,7 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
     @patch('github_stats_analyzer.analyzer.GitHubStatsAnalyzer.fetch_user_repos')
     @patch('github_stats_analyzer.analyzer.GitHubStatsAnalyzer.process_repos')
     @patch('github_stats_analyzer.analyzer.GitHubStatsAnalyzer.calculate_language_percentages')
-    async def test_analyze(self, mock_calc, mock_process, mock_fetch):
+    def test_analyze(self, mock_calc, mock_process, mock_fetch):
         """测试分析方法"""
         # 创建模拟仓库列表
         mock_repos = [
@@ -85,8 +85,9 @@ class TestGitHubStatsAnalyzer(unittest.TestCase):
             excluded_languages=self.excluded_languages
         )
         
-        # 调用分析方法
-        await analyzer.analyze()
+        # 创建事件循环并运行异步方法
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(analyzer.analyze())
         
         # 验证方法调用
         mock_fetch.assert_called_once()
@@ -196,11 +197,12 @@ class TestGitHubAPIClient(unittest.TestCase):
         self.assertIsNotNone(client.client)
     
     @patch('httpx.AsyncClient.get')
-    async def test_get_user_repos_basic(self, mock_get):
+    def test_get_user_repos_basic(self, mock_get):
         """测试获取用户仓库 (基本访问级别)"""
         # 创建模拟响应
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.content = b'{"some": "content"}'
         mock_response.json.return_value = [
             {
                 "name": "repo1",
@@ -217,8 +219,9 @@ class TestGitHubAPIClient(unittest.TestCase):
         # 创建客户端实例
         client = GitHubAPIClient(AccessLevel.BASIC)
         
-        # 调用方法
-        repos = await client.get_user_repos("test-user")
+        # 创建事件循环并运行异步方法
+        loop = asyncio.get_event_loop()
+        repos = loop.run_until_complete(client.get_user_repos("test-user"))
         
         # 验证结果
         self.assertEqual(len(repos), 1)

@@ -29,8 +29,9 @@ def run_unit_tests():
     suite = unittest.TestSuite()
     
     # 添加测试用例
-    suite.addTest(unittest.makeSuite(TestGitHubStatsAnalyzer))
-    suite.addTest(unittest.makeSuite(TestGitHubAPIClient))
+    loader = unittest.TestLoader()
+    suite.addTest(loader.loadTestsFromTestCase(TestGitHubStatsAnalyzer))
+    suite.addTest(loader.loadTestsFromTestCase(TestGitHubAPIClient))
     
     # 运行测试
     runner = unittest.TextTestRunner(verbosity=2)
