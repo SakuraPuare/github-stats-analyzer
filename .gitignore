@@ -175,4 +175,9 @@ cython_debug/
 
 .vscode
 
+# Logs
+*.log
+log/*
+!log/.gitkeep
+
 .env

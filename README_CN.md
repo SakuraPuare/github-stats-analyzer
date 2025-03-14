@@ -108,6 +108,7 @@ python main.py <github_username> [--debug] [--include-all]
 - GitHub API有速率限制，因此分析拥有许多仓库的用户可能需要一些时间
 - 代码行数是基于字节数的估计（近似值）
 - 默认情况下排除某些语言以避免统计偏差（使用`--include-all`选项可包含所有语言）
+- 日志文件存储在`log`目录中
 
 ## 🤝 贡献
 

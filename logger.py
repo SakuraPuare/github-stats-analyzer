@@ -3,8 +3,13 @@
 Logging configuration for GitHub User Statistics Analyzer
 """
 
+import os
 from tqdm import tqdm
 from loguru import logger
+
+# Create log directory if it doesn't exist
+log_dir = "log"
+os.makedirs(log_dir, exist_ok=True)
 
 # Custom sink for loguru that uses tqdm.write to avoid breaking progress bars
 def tqdm_sink(message):
@@ -15,7 +20,7 @@ logger.remove()  # Remove default handler
 
 # Add file handler (not affected by tqdm)
 logger.add(
-    "github_stats_{time}.log", 
+    os.path.join(log_dir, "github_stats_{time}.log"), 
     rotation="10 MB", 
     level="DEBUG", 
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
@@ -53,7 +58,7 @@ def configure_logger(debug_mode=False):
         logger.configure(handlers=[
             {"sink": tqdm_sink, "level": "DEBUG", "colorize": True, 
              "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
+            {"sink": os.path.join(log_dir, "github_stats_{time}.log"), "level": "DEBUG", "rotation": "10 MB",
              "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
         ])
     else:
@@ -61,6 +66,6 @@ def configure_logger(debug_mode=False):
         logger.configure(handlers=[
             {"sink": tqdm_sink, "level": "INFO", "colorize": True, 
              "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": "github_stats_{time}.log", "level": "DEBUG", "rotation": "10 MB",
+            {"sink": os.path.join(log_dir, "github_stats_{time}.log"), "level": "DEBUG", "rotation": "10 MB",
              "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
         ]) 

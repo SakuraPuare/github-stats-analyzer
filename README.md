@@ -108,6 +108,7 @@ The program will display:
 - GitHub API has rate limits, so analyzing users with many repositories might take time
 - Lines of code are estimated based on byte count (approximation)
 - Some languages are excluded by default to avoid skewing statistics (use `--include-all` to include them)
+- Log files are stored in the `log` directory
 
 ## 🤝 Contributing
 
