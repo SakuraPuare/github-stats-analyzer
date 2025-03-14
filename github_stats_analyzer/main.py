@@ -21,13 +21,13 @@ from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
 
 async def main_async():
     """Main entry point for the application."""
-    logger.info("GitHub Statistics Analyzer starting")
-    
     # Parse command line arguments
     username, debug_mode, excluded_languages, github_token, access_level = parse_args()
     
     # Configure logger based on debug mode
     configure_logger(debug_mode)
+    
+    logger.info("GitHub Statistics Analyzer starting")
     
     # Validate environment
     validate_environment(github_token)

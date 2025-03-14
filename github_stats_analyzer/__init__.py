@@ -1,18 +1,18 @@
+#!/usr/bin/env python3
 """
 GitHub User Statistics Analyzer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A comprehensive GitHub user statistics analyzer that collects detailed statistics
-on code contributions, language distribution, and repository information.
-
-:copyright: (c) 2024 by SakuraPuare
-:license: MIT, see LICENSE for more details.
+A tool to analyze GitHub user statistics.
 """
 
-from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
-from github_stats_analyzer.api import GitHubApiClient
+__version__ = "0.1.0"
 
-__all__ = ['GitHubStatsAnalyzer', 'GitHubApiClient']
+# Import main classes and functions for easier access
+from github_stats_analyzer.models import AccessLevel
+from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
+from github_stats_analyzer.api import GitHubAPIClient
+
+__all__ = ['GitHubStatsAnalyzer', 'GitHubAPIClient']
 
 try:
     from ._version import version as __version__

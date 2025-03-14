@@ -4,68 +4,71 @@ Logging configuration for GitHub User Statistics Analyzer
 """
 
 import os
-from tqdm import tqdm
+import sys
+from datetime import datetime
+from typing import Optional
+
 from loguru import logger
+from tqdm import tqdm
 
-# Create log directory if it doesn't exist
-log_dir = "log"
-os.makedirs(log_dir, exist_ok=True)
-
-# Custom sink for loguru that uses tqdm.write to avoid breaking progress bars
-def tqdm_sink(message):
-    tqdm.write(message, end="")
-
-# Configure loguru logger
-logger.remove()  # Remove default handler
-
-# Add file handler (not affected by tqdm)
-logger.add(
-    os.path.join(log_dir, "github_stats_{time}.log"), 
-    rotation="10 MB", 
-    level="DEBUG", 
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
-)
-
-# Add console handler using tqdm.write
-logger.add(
-    tqdm_sink,
-    colorize=True,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
+# Configure logger
+def configure_logger(debug_mode: bool = False) -> None:
+    """Configure the logger.
+    
+    Args:
+        debug_mode: Whether to enable debug output
+    """
+    # Create log directory if it doesn't exist
+    log_dir = os.path.join(os.getcwd(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Generate log filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"github_stats_{timestamp}.log")
+    
+    # Remove default handler
+    logger.remove()
+    
+    # Add console handler with appropriate level
+    level = "DEBUG" if debug_mode else "INFO"
+    logger.add(sys.stderr, level=level, format="<level>{level}</level> | <green>{time:YYYY-MM-DD HH:mm:ss}</green> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
+    
+    # Add file handler
+    logger.add(log_file, level="DEBUG", format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}")
+    
+    logger.info(f"Logging to {log_file}")
+    if debug_mode:
+        logger.info("Debug mode enabled")
 
 class TqdmProgressBar:
-    """Custom progress bar class that integrates with loguru."""
+    """Progress bar using tqdm."""
     
-    def __init__(self, total, desc):
-        self.pbar = tqdm(total=total, desc=desc)
+    def __init__(self, total: int, desc: str = "Progress"):
+        """Initialize the progress bar.
         
-    def update(self, n=1):
-        self.pbar.update(n)
-        
-    def close(self):
-        self.pbar.close()
-        
+        Args:
+            total: Total number of items
+            desc: Description of the progress bar
+        """
+        self.total = total
+        self.desc = desc
+        self.progress_bar = None
+    
     def __enter__(self):
+        """Enter the context manager."""
+        self.progress_bar = tqdm(total=self.total, desc=self.desc, unit="repo")
         return self
-        
+    
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
-def configure_logger(debug_mode=False):
-    """Configure logger based on debug mode"""
-    if debug_mode:
-        # Set loguru level to DEBUG for console output
-        logger.configure(handlers=[
-            {"sink": tqdm_sink, "level": "DEBUG", "colorize": True, 
-             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": os.path.join(log_dir, "github_stats_{time}.log"), "level": "DEBUG", "rotation": "10 MB",
-             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
-        ])
-    else:
-        # Set loguru level to INFO for console output
-        logger.configure(handlers=[
-            {"sink": tqdm_sink, "level": "INFO", "colorize": True, 
-             "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"},
-            {"sink": os.path.join(log_dir, "github_stats_{time}.log"), "level": "DEBUG", "rotation": "10 MB",
-             "format": "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"}
-        ]) 
+        """Exit the context manager."""
+        if self.progress_bar:
+            self.progress_bar.close()
+    
+    def update(self, n: int = 1):
+        """Update the progress bar.
+        
+        Args:
+            n: Number of items to increment by
+        """
+        if self.progress_bar:
+            self.progress_bar.update(n) 

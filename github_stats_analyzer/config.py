@@ -29,52 +29,56 @@ DEBUG = False  # Set to True to enable debug output
 MAX_RETRIES = 3  # Maximum number of retries for HTTP requests
 RETRY_DELAY = 1.0  # Initial delay between retries (seconds)
 
-# Languages to exclude from line count statistics (can cause data skew)
-EXCLUDED_LANGUAGES: Set[str] = {
-    "Mathematica",       # Contains a lot of output and markdown
-    "Jupyter Notebook",  # Contains a lot of output and markdown
-    "HTML",              # Often generated or contains a lot of boilerplate
-    "CSS",               # Often minified or generated
-    "JSON",              # Data files, not code
-    "YAML",              # Configuration files
-    "Markdown",          # Documentation
-    "Text",              # Plain text files
-    "XML",               # Data files
-    "CSV",               # Data files
-    "TSV",               # Data files
-    "reStructuredText",  # Documentation
-    "SVG",               # Vector graphics
-}
+# Rate limits
+RATE_LIMIT_WITH_TOKEN = 5000  # Requests per hour with token
+RATE_LIMIT_WITHOUT_TOKEN = 60  # Requests per hour without token
 
-# Define file extensions to exclude (non-code files)
-NON_CODE_EXTENSIONS = {
-    '.csv', '.json', '.yaml', '.yml', '.md', '.txt', '.log', '.data',
-    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.doc', '.docx',
-    '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz', '.rar',
-    '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac', '.ogg',
-    '.ttf', '.woff', '.woff2', '.eot', '.otf',
-    '.min.js', '.min.css'  # Minified files
-}
-
-# Rate Limits
-RATE_LIMIT_WITH_TOKEN = 5000  # requests per hour with token
-RATE_LIMIT_WITHOUT_TOKEN = 60  # requests per hour without token
-
-# Access Levels
+# Access levels
 class AccessLevel:
-    BASIC = "basic"  # No token, limited data
-    FULL = "full"    # With token, full data
+    """Access level for GitHub API"""
+    BASIC = "basic"
+    FULL = "full"
 
-# Repository limits per access level
-REPO_LIMITS = {
-    AccessLevel.BASIC: 30,  # Maximum number of repositories to analyze
-    AccessLevel.FULL: None  # None means no limit
+# Access level configuration
+ACCESS_LEVEL_CONFIG = {
+    AccessLevel.BASIC: {
+        "include_forks": False,
+        "include_private": False,
+        "include_archived": False,
+        "show_details": False,
+    },
+    AccessLevel.FULL: {
+        "include_forks": True,
+        "include_private": True,
+        "include_archived": True,
+        "show_details": True,
+    }
 }
 
-# Commit limits per repository per access level
+# Repository limits
+REPO_LIMITS = {
+    AccessLevel.BASIC: 30,  # Maximum number of repositories to analyze in basic mode
+    AccessLevel.FULL: 1000  # Maximum number of repositories to analyze in full mode
+}
+
+# Commit limits
 COMMIT_LIMITS = {
-    AccessLevel.BASIC: 30,  # Maximum number of commits to analyze per repo
-    AccessLevel.FULL: None  # None means no limit
+    AccessLevel.BASIC: 30,  # Maximum number of commits to analyze per repository in basic mode
+    AccessLevel.FULL: 1000  # Maximum number of commits to analyze per repository in full mode
+}
+
+# Languages to exclude from statistics
+EXCLUDED_LANGUAGES: Set[str] = {
+    "HTML", "CSS", "Jupyter Notebook", "Markdown", "Text", "CSV", "TSV", "JSON", "YAML", "XML"
+}
+
+# Extensions to consider as non-code files
+NON_CODE_EXTENSIONS: Set[str] = {
+    ".md", ".txt", ".json", ".csv", ".tsv", ".yml", ".yaml", ".xml", ".html", ".css", 
+    ".ipynb", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".ttf", ".woff", 
+    ".woff2", ".eot", ".otf", ".mp3", ".mp4", ".avi", ".mov", ".webm", ".ogg", ".wav", 
+    ".flac", ".zip", ".tar", ".gz", ".7z", ".rar", ".doc", ".docx", ".xls", ".xlsx", 
+    ".ppt", ".pptx", ".odt", ".ods", ".odp", ".pages", ".numbers", ".key"
 }
 
 # Default excluded languages
@@ -167,36 +171,4 @@ OUTPUT_CONFIG: Dict[str, Any] = {
     "show_debug": False,
     "color_output": True,
     "format": "text",  # Options: text, json, csv
-}
-
-# Access level specific configurations
-ACCESS_LEVEL_CONFIG = {
-    AccessLevel.BASIC: {
-        "include_forks": False,
-        "include_private": False,
-        "include_archived": False,
-        "max_repos": 30,
-        "max_commits_per_repo": 30,
-        "include_merges": False,
-        "include_reverts": False,
-        "include_amendments": False,
-        "include_initial_commits": True,
-        "include_empty_commits": False,
-        "show_details": False,
-        "show_charts": False,
-    },
-    AccessLevel.FULL: {
-        "include_forks": True,
-        "include_private": True,
-        "include_archived": True,
-        "max_repos": None,
-        "max_commits_per_repo": None,
-        "include_merges": False,
-        "include_reverts": False,
-        "include_amendments": True,
-        "include_initial_commits": True,
-        "include_empty_commits": False,
-        "show_details": True,
-        "show_charts": True,
-    }
 } 
