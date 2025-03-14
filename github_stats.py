@@ -19,7 +19,7 @@ import sys
 import json
 import asyncio
 import time
-from typing import Dict, List, Tuple, Any, Optional, Union, Set
+from typing import Dict, List, Tuple, Any, Optional, Union, Set, NamedTuple
 from datetime import datetime
 import io
 
@@ -102,6 +102,17 @@ class TqdmProgressBar:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+class RepoStats(NamedTuple):
+    """Statistics for a single repository."""
+    name: str
+    additions: int
+    deletions: int
+    net_change: int
+    languages: Dict[str, int]
+    stars: int
+    created_at: str
+    excluded: bool
+
 class GitHubStatsAnalyzer:
     def __init__(self, username: str, excluded_languages: Optional[Set[str]] = None):
         self.username = username
@@ -117,6 +128,7 @@ class GitHubStatsAnalyzer:
         self.request_count = 0  # Track number of API requests
         self.excluded_languages = excluded_languages or EXCLUDED_LANGUAGES
         self.repo_language_stats: Dict[str, Dict[str, int]] = {}  # Track language stats per repo
+        self.repo_stats: Dict[str, RepoStats] = {}  # Detailed stats for each repo
         
     async def close(self):
         await self.client.aclose()
@@ -375,16 +387,32 @@ class GitHubStatsAnalyzer:
             # Store language stats for this repo
             self.repo_language_stats[repo_name] = languages
             
+            # Store detailed stats for this repo
+            created_at = datetime.strptime(repo["created_at"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d")
+            is_excluded = self.should_exclude_repo(repo_name, languages)
+            
+            self.repo_stats[repo_name] = RepoStats(
+                name=repo_name,
+                additions=additions,
+                deletions=deletions,
+                net_change=additions - deletions,
+                languages=languages,
+                stars=repo["stargazers_count"],
+                created_at=created_at,
+                excluded=is_excluded
+            )
+            
             logger.info(f"Repository {repo_name} complete: +{additions}, -{deletions}, languages: {list(languages.keys())}")
                 
             return additions, deletions, languages
     
-    def should_exclude_repo(self, repo_name: str) -> bool:
+    def should_exclude_repo(self, repo_name: str, languages: Optional[Dict[str, int]] = None) -> bool:
         """Determine if a repository should be excluded from filtered stats based on its languages."""
-        if repo_name not in self.repo_language_stats:
-            return False
+        if languages is None:
+            if repo_name not in self.repo_language_stats:
+                return False
+            languages = self.repo_language_stats[repo_name]
             
-        languages = self.repo_language_stats[repo_name]
         if not languages:
             return False
             
@@ -503,15 +531,31 @@ class GitHubStatsAnalyzer:
             # Mark excluded languages
             excluded_mark = " (excluded)" if language in self.excluded_languages else ""
             print(f"{language:<15}{excluded_mark}: {bytes_count:,} bytes ({percentage:.1f}%) ≈ {lines_estimate:,} lines")
-            
-        print("\nRepository List:")
-        print("-"*50)
-        for repo in self.repos:
-            created_at = datetime.strptime(repo["created_at"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d")
-            excluded = "*" if self.should_exclude_repo(repo["name"]) else ""
-            print(f"{repo['name']:<30}{excluded} - Stars: {repo['stargazers_count']:<5} - Created: {created_at}")
         
-        if any(self.should_exclude_repo(repo["name"]) for repo in self.repos):
+        # Print detailed repository statistics
+        print("\nDetailed Repository Statistics (sorted by net change):")
+        print("-"*100)
+        print(f"{'Repository':<30} | {'Additions':>10} | {'Deletions':>10} | {'Net Change':>10} | {'Stars':>5} | {'Created':>10} | {'Languages':<20}")
+        print("-"*100)
+        
+        # Sort repositories by net change
+        sorted_repos = sorted(
+            self.repo_stats.values(),
+            key=lambda x: x.net_change,
+            reverse=True
+        )
+        
+        for repo in sorted_repos:
+            # Get top 3 languages
+            top_languages = []
+            if repo.languages:
+                sorted_repo_langs = sorted(repo.languages.items(), key=lambda x: x[1], reverse=True)
+                top_languages = [lang for lang, _ in sorted_repo_langs[:3]]
+            
+            excluded_mark = " *" if repo.excluded else ""
+            print(f"{repo.name:<28}{excluded_mark} | {repo.additions:>10,} | {repo.deletions:>10,} | {repo.net_change:>10,} | {repo.stars:>5} | {repo.created_at:>10} | {', '.join(top_languages):<20}")
+        
+        if any(repo.excluded for repo in self.repo_stats.values()):
             print("\n* Repositories excluded from filtered statistics due to high percentage of excluded languages")
         
         print(f"\nTotal GitHub API Requests: {self.request_count}")
