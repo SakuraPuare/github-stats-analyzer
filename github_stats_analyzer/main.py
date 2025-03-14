@@ -5,22 +5,21 @@ GitHub User Statistics Analyzer
 This script analyzes a GitHub user's repositories to collect statistics on:
 - Additions and deletions across all repositories
 - Lines of code per programming language
-- Ignores forked repositories
+- Repository information including forks
 
 Usage:
-    python main.py <github_username>
-
-Requirements:
-    - GitHub Personal Access Token in .env file
+    github-stats <github_username>
+    python -m github_stats_analyzer <github_username>
 """
 
 import asyncio
+import sys
 
-from logger import logger, configure_logger
-from cli import parse_args, validate_environment, handle_error
-from analyzer import GitHubStatsAnalyzer
+from github_stats_analyzer.logger import logger, configure_logger
+from github_stats_analyzer.cli import parse_args, validate_environment, handle_error
+from github_stats_analyzer.analyzer import GitHubStatsAnalyzer
 
-async def main():
+async def main_async():
     """Main entry point for the application."""
     logger.info("GitHub Statistics Analyzer starting")
     
@@ -46,5 +45,15 @@ async def main():
         await analyzer.close()
         logger.info("Session closed")
 
+def main():
+    """Entry point for the console script."""
+    try:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        logger.warning("Analysis interrupted by user")
+        sys.exit(1)
+
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    main() 
