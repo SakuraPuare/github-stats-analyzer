@@ -3,216 +3,285 @@
 GitHub API client for the GitHub User Statistics Analyzer
 """
 
-import time
-import json
 import asyncio
-from typing import Dict, List, Tuple, Any, Union, Optional
-
 import httpx
+import os
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
 
 from github_stats_analyzer.config import (
     GITHUB_API_URL,
-    GITHUB_TOKEN,
-    AccessLevel,
+    HEADERS,
+    MAX_RETRIES,
+    RETRY_DELAY,
+    ACCESS_LEVEL_CONFIG,
     RATE_LIMIT_WITH_TOKEN,
-    RATE_LIMIT_WITHOUT_TOKEN,
-    ERROR_HANDLING_CONFIG
+    RATE_LIMIT_WITHOUT_TOKEN
+)
+from github_stats_analyzer.models import (
+    Repository,
+    Commit,
+    AccessLevel
 )
 from github_stats_analyzer.logger import logger
 
-class GitHubApiClient:
-    """Client for interacting with the GitHub API."""
+class GitHubAPIClient:
+    """GitHub API client for the GitHub User Statistics Analyzer"""
     
     def __init__(self, access_level: str = AccessLevel.BASIC):
         """Initialize the GitHub API client.
         
         Args:
-            access_level: The access level to use (basic or full)
+            access_level: Access level to use (basic or full)
         """
         self.access_level = access_level
-        self.headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "GitHub-Stats-Analyzer",
+        self.config = ACCESS_LEVEL_CONFIG[access_level]
+        self.client = httpx.AsyncClient(
+            base_url=GITHUB_API_URL,
+            headers=self._get_headers(),
+            timeout=30.0
+        )
+        self.request_count = 0
+        self.rate_limit_remaining = RATE_LIMIT_WITH_TOKEN if os.getenv("GITHUB_TOKEN") else RATE_LIMIT_WITHOUT_TOKEN
+        self.rate_limit_reset = 0
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for GitHub API requests.
+        
+        Returns:
+            Headers dictionary
+        """
+        headers = {
+            "Accept": "application/vnd.github.v3+json"
         }
         
-        if access_level == AccessLevel.FULL and GITHUB_TOKEN:
-            self.headers["Authorization"] = f"token {GITHUB_TOKEN}"
-            self.rate_limit = RATE_LIMIT_WITH_TOKEN
-        else:
-            self.rate_limit = RATE_LIMIT_WITHOUT_TOKEN
-            
-        self.client = httpx.AsyncClient(
-            headers=self.headers,
-            timeout=ERROR_HANDLING_CONFIG["timeout"]
-        )
+        # Add authorization header if token is available
+        github_token = os.getenv("GITHUB_TOKEN")
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
         
+        return headers
+    
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
-        
-    async def github_request(
-        self,
-        method: str,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        retry_count: int = 0
-    ) -> Tuple[int, Optional[List[Dict[str, Any]]]]:
+    
+    async def github_request(self, method: str, endpoint: str, **kwargs) -> Tuple[int, Any]:
         """Make a request to the GitHub API.
         
         Args:
-            method: HTTP method to use
-            endpoint: API endpoint to request
-            params: Query parameters
-            retry_count: Number of retries attempted
+            method: HTTP method (get, post, etc.)
+            endpoint: API endpoint
+            **kwargs: Additional arguments to pass to the request
             
         Returns:
             Tuple of (status_code, response_data)
         """
-        url = f"{GITHUB_API_URL}/{endpoint.lstrip('/')}"
+        url = endpoint if endpoint.startswith("http") else f"{GITHUB_API_URL}/{endpoint}"
         
-        try:
-            response = await self.client.request(method, url, params=params)
-            
-            # Handle rate limiting
-            if response.status_code == 403:
-                remaining = int(response.headers.get("X-RateLimit-Remaining", 0))
-                if remaining == 0:
-                    reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
-                    wait_time = reset_time - int(time.time())
+        # Check rate limit
+        if self.rate_limit_remaining <= 1:
+            now = datetime.now().timestamp()
+            if now < self.rate_limit_reset:
+                wait_time = self.rate_limit_reset - now + 1
+                logger.warning(f"Rate limit exceeded. Waiting {wait_time:.1f} seconds.")
+                await asyncio.sleep(wait_time)
+        
+        # Make the request with retries
+        for attempt in range(MAX_RETRIES):
+            try:
+                self.request_count += 1
+                response = await getattr(self.client, method.lower())(url, **kwargs)
+                
+                # Update rate limit information
+                self.rate_limit_remaining = int(response.headers.get("X-RateLimit-Remaining", "1"))
+                self.rate_limit_reset = int(response.headers.get("X-RateLimit-Reset", "0"))
+                
+                # Check for rate limiting
+                if response.status_code == 403 and "rate limit exceeded" in response.text.lower():
+                    reset_time = int(response.headers.get("X-RateLimit-Reset", "0"))
+                    now = datetime.now().timestamp()
+                    wait_time = reset_time - now + 1
+                    
                     if wait_time > 0:
-                        logger.warning(f"Rate limit reached. Waiting {wait_time} seconds...")
+                        logger.warning(f"Rate limit exceeded. Waiting {wait_time:.1f} seconds.")
                         await asyncio.sleep(wait_time)
-                        return await self.github_request(method, endpoint, params, retry_count)
-            
-            # Handle other errors
-            if response.status_code >= 400:
-                if retry_count < ERROR_HANDLING_CONFIG["max_retries"]:
-                    logger.warning(f"Request failed with status {response.status_code}, retrying...")
-                    await asyncio.sleep(ERROR_HANDLING_CONFIG["retry_delay"])
-                    return await self.github_request(method, endpoint, params, retry_count + 1)
+                        continue
+                
+                # Return response
+                if response.status_code < 400:
+                    return response.status_code, response.json() if response.content else None
                 else:
-                    logger.error(f"Request failed after {retry_count} retries")
+                    logger.warning(f"GitHub API error: {response.status_code} - {response.text}")
                     return response.status_code, None
                     
-            return response.status_code, response.json()
-            
-        except Exception as e:
-            if retry_count < ERROR_HANDLING_CONFIG["max_retries"]:
-                logger.warning(f"Request failed: {str(e)}, retrying...")
-                await asyncio.sleep(ERROR_HANDLING_CONFIG["retry_delay"])
-                return await self.github_request(method, endpoint, params, retry_count + 1)
-            else:
-                logger.error(f"Request failed after {retry_count} retries: {str(e)}")
-                return 500, None
+            except httpx.RequestError as e:
+                logger.error(f"Request error: {str(e)}")
                 
-    async def get_user_info(self, username: str) -> Optional[Dict[str, Any]]:
-        """Get basic information about a GitHub user.
+                # Exponential backoff
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = RETRY_DELAY * (2 ** attempt)
+                    logger.info(f"Retrying in {wait_time:.1f} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed after {MAX_RETRIES} attempts")
+                    return 0, None
+    
+    async def get_user_repos(self, username: str, include_private: bool = False) -> List[Repository]:
+        """Get repositories for a user.
         
         Args:
             username: GitHub username
+            include_private: Whether to include private repositories
             
         Returns:
-            User information dictionary or None if not found
+            List of repositories
         """
-        status, data = await self.github_request("get", f"users/{username}")
-        return data if status == 200 else None
+        page = 1
+        all_repos = []
         
-    async def get_user_repos(
-        self,
-        username: str,
-        page: int = 1,
-        per_page: int = 100
-    ) -> List[Dict[str, Any]]:
-        """Get repositories for a GitHub user.
-        
-        Args:
-            username: GitHub username
-            page: Page number to fetch
-            per_page: Number of items per page
+        while True:
+            status, repos = await self.github_request(
+                "get",
+                f"users/{username}/repos",
+                params={
+                    "page": page,
+                    "per_page": 100,
+                    "sort": "updated",
+                    "direction": "desc"
+                }
+            )
             
-        Returns:
-            List of repository dictionaries
-        """
-        params = {
-            "page": page,
-            "per_page": per_page,
-            "sort": "updated",
-            "direction": "desc"
-        }
-        
-        if self.access_level == AccessLevel.BASIC:
-            params["type"] = "public"
+            if status != 200 or not repos:
+                break
             
-        status, data = await self.github_request(
-            "get",
-            f"users/{username}/repos",
-            params=params
-        )
-        return data if status == 200 else []
+            # Convert to Repository objects
+            for repo_data in repos:
+                repo = Repository(
+                    name=repo_data["name"],
+                    full_name=repo_data["full_name"],
+                    description=repo_data.get("description"),
+                    language=repo_data.get("language"),
+                    fork=repo_data.get("fork", False),
+                    private=repo_data.get("private", False),
+                    archived=repo_data.get("archived", False),
+                    created_at=datetime.fromisoformat(repo_data["created_at"].replace("Z", "+00:00")) if repo_data.get("created_at") else None,
+                    updated_at=datetime.fromisoformat(repo_data["updated_at"].replace("Z", "+00:00")) if repo_data.get("updated_at") else None,
+                    pushed_at=datetime.fromisoformat(repo_data["pushed_at"].replace("Z", "+00:00")) if repo_data.get("pushed_at") else None,
+                    stargazers_count=repo_data.get("stargazers_count", 0),
+                    forks_count=repo_data.get("forks_count", 0),
+                    size=repo_data.get("size", 0),
+                    url=repo_data.get("url", ""),
+                    html_url=repo_data.get("html_url", ""),
+                    owner_login=repo_data.get("owner", {}).get("login", "")
+                )
+                all_repos.append(repo)
+            
+            page += 1
         
-    async def get_repo_commits(
-        self,
-        owner: str,
-        repo: str,
-        author: Optional[str] = None,
-        page: int = 1,
-        per_page: int = 100
-    ) -> List[Dict[str, Any]]:
+        return all_repos
+    
+    async def get_repo_commits(self, repo_full_name: str, author: str) -> List[Commit]:
         """Get commits for a repository.
         
         Args:
-            owner: Repository owner
-            repo: Repository name
-            author: Filter commits by author
-            page: Page number to fetch
-            per_page: Number of items per page
+            repo_full_name: Full name of the repository (owner/repo)
+            author: GitHub username of the author
             
         Returns:
-            List of commit dictionaries
+            List of commits
         """
-        params = {
-            "page": page,
-            "per_page": per_page
-        }
+        page = 1
+        all_commits = []
         
-        if author:
-            params["author"] = author
+        while True:
+            status, commits = await self.github_request(
+                "get",
+                f"repos/{repo_full_name}/commits",
+                params={
+                    "page": page,
+                    "per_page": 100,
+                    "author": author
+                }
+            )
             
-        status, data = await self.github_request(
-            "get",
-            f"repos/{owner}/{repo}/commits",
-            params=params
-        )
-        return data if status == 200 else []
+            if status != 200 or not commits:
+                break
+            
+            # Convert to Commit objects
+            for commit_data in commits:
+                commit = Commit(
+                    sha=commit_data["sha"],
+                    author_login=commit_data.get("author", {}).get("login"),
+                    message=commit_data.get("commit", {}).get("message", ""),
+                    date=datetime.fromisoformat(commit_data.get("commit", {}).get("author", {}).get("date", "").replace("Z", "+00:00")) if commit_data.get("commit", {}).get("author", {}).get("date") else None,
+                    url=commit_data.get("url", ""),
+                    html_url=commit_data.get("html_url", "")
+                )
+                all_commits.append(commit)
+            
+            page += 1
         
-    async def get_repo_languages(self, owner: str, repo: str) -> Dict[str, int]:
+        return all_commits
+    
+    async def get_commit_detail(self, repo_full_name: str, commit_sha: str) -> Commit:
+        """Get details for a commit.
+        
+        Args:
+            repo_full_name: Full name of the repository (owner/repo)
+            commit_sha: SHA of the commit
+            
+        Returns:
+            Commit object
+        """
+        status, commit_data = await self.github_request(
+            "get",
+            f"repos/{repo_full_name}/commits/{commit_sha}"
+        )
+        
+        if status != 200 or not commit_data:
+            raise Exception(f"Failed to get commit details: {status}")
+        
+        # Calculate additions and deletions
+        additions = 0
+        deletions = 0
+        
+        for file in commit_data.get("files", []):
+            additions += file.get("additions", 0)
+            deletions += file.get("deletions", 0)
+        
+        # Create Commit object
+        commit = Commit(
+            sha=commit_data["sha"],
+            author_login=commit_data.get("author", {}).get("login"),
+            author_name=commit_data.get("commit", {}).get("author", {}).get("name"),
+            author_email=commit_data.get("commit", {}).get("author", {}).get("email"),
+            message=commit_data.get("commit", {}).get("message", ""),
+            date=datetime.fromisoformat(commit_data.get("commit", {}).get("author", {}).get("date", "").replace("Z", "+00:00")) if commit_data.get("commit", {}).get("author", {}).get("date") else None,
+            additions=additions,
+            deletions=deletions,
+            total=additions + deletions,
+            url=commit_data.get("url", ""),
+            html_url=commit_data.get("html_url", "")
+        )
+        
+        return commit
+    
+    async def get_repo_languages(self, repo_full_name: str) -> Dict[str, int]:
         """Get language statistics for a repository.
         
         Args:
-            owner: Repository owner
-            repo: Repository name
+            repo_full_name: Full name of the repository (owner/repo)
             
         Returns:
-            Dictionary mapping language names to byte counts
+            Dictionary of language -> bytes
         """
-        status, data = await self.github_request(
+        status, languages = await self.github_request(
             "get",
-            f"repos/{owner}/{repo}/languages"
+            f"repos/{repo_full_name}/languages"
         )
-        return data if status == 200 else {}
         
-    async def get_repo_stats(self, owner: str, repo: str) -> Optional[Dict[str, Any]]:
-        """Get contributor statistics for a repository.
+        if status != 200 or not languages:
+            return {}
         
-        Args:
-            owner: Repository owner
-            repo: Repository name
-            
-        Returns:
-            Contributor statistics dictionary or None if not available
-        """
-        status, data = await self.github_request(
-            "get",
-            f"repos/{owner}/{repo}/stats/contributors"
-        )
-        return data if status == 200 else None 
+        return languages 

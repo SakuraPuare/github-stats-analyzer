@@ -3,18 +3,73 @@
 Data models for GitHub User Statistics Analyzer
 """
 
-from typing import Dict, NamedTuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Any
+from datetime import datetime
 
-class RepoStats(NamedTuple):
-    """Statistics for a single repository."""
+class AccessLevel:
+    """Access level for GitHub API"""
+    BASIC = "basic"
+    FULL = "full"
+
+@dataclass
+class Repository:
+    """GitHub repository information"""
     name: str
-    additions: int
-    deletions: int
-    net_change: int
-    code_additions: int  # Additions in code files only
-    code_deletions: int  # Deletions in code files only
-    code_net_change: int  # Net change in code files only
-    languages: Dict[str, int]
-    stars: int
-    created_at: str
-    excluded: bool 
+    full_name: str
+    description: Optional[str] = None
+    language: Optional[str] = None
+    fork: bool = False
+    private: bool = False
+    archived: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    pushed_at: Optional[datetime] = None
+    stargazers_count: int = 0
+    forks_count: int = 0
+    size: int = 0
+    url: str = ""
+    html_url: str = ""
+    owner_login: str = ""
+
+@dataclass
+class Commit:
+    """GitHub commit information"""
+    sha: str
+    author_login: Optional[str] = None
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    message: str = ""
+    date: Optional[datetime] = None
+    additions: int = 0
+    deletions: int = 0
+    total: int = 0
+    url: str = ""
+    html_url: str = ""
+
+@dataclass
+class LanguageStats:
+    """Statistics for a programming language"""
+    name: str
+    bytes: int = 0
+    lines: int = 0
+    percentage: float = 0.0
+
+@dataclass
+class RepoStats:
+    """Statistics for a repository"""
+    name: str
+    full_name: str
+    additions: int = 0
+    deletions: int = 0
+    total_lines: int = 0
+    languages: Dict[str, int] = field(default_factory=dict)
+    commit_count: int = 0
+    is_fork: bool = False
+    stars: int = 0
+    created_at: Optional[datetime] = None
+    
+    def __post_init__(self):
+        """Initialize derived fields"""
+        if not hasattr(self, 'languages'):
+            self.languages = {} 
