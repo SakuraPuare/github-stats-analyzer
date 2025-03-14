@@ -172,6 +172,6 @@ jobs:
         cp test_report.md test_results/
         cp json_output.txt test_results/
         cp csv_output.txt test_results/
-        git add test_results/
+        git add -f test_results/
         git commit -m "Update test results [skip ci]" || exit 0
         git push -f origin test-results 

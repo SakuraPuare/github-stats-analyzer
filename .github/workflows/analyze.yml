@@ -31,8 +31,6 @@ jobs:
         # 创建结果目录
         mkdir -p results
 
-        touch results/RESULT.md
-
         echo "## 分析结果" > results/RESULT.md
 
         echo "```" >> results/RESULT.md
