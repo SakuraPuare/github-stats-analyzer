@@ -30,6 +30,7 @@ View the latest analysis results in the [stats branch](https://github.com/Sakura
 - **Detailed Logging**: Comprehensive logging for debugging
 - **Access Levels**: Supports both basic (no token) and full (with token) access modes
 - **Flexible Token Configuration**: Support for multiple ways to provide GitHub token
+- **Extensive Testing**: View our [test results and testing pipeline](https://github.com/SakuraPuare/github-stats-analyzer/blob/test-results/test_results/test_report.md) for quality assurance
 
 ## 🔧 Requirements
 
