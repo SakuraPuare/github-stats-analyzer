@@ -1,0 +1,59 @@
+name: Analyze GitHub Stats
+
+on:
+  push:
+    branches: [ main, master ]  # 在推送到 main 或 master 分支时触发
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.7'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install github-stats-analyzer
+    
+    - name: Run analysis
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # 创建结果目录
+        mkdir -p results
+        
+        # 运行分析器并将输出重定向到文件
+        github-stats ${{ github.repository_owner }} --access-level full > results/RESULT.md
+        
+        # 添加时间戳
+        echo -e "\n\n---\nLast updated: $(date -u)" >> results/RESULT.md
+    
+    - name: Update README
+      run: |
+        # 更新 README.md
+        echo -e "\n## 📊 Latest Analysis Results\n\nView the latest analysis results in the [stats branch](https://github.com/${{ github.repository }}/tree/stats/results/RESULT.md).\n" >> README.md
+        
+        # 更新 README_CN.md
+        echo -e "\n## 📊 最新分析结果\n\n在 [stats 分支](https://github.com/${{ github.repository }}/tree/stats/results/RESULT.md) 中查看最新分析结果。\n" >> README_CN.md
+    
+    - name: Create and push to stats branch
+      run: |
+        # 创建并切换到 stats 分支
+        git checkout -b stats
+        
+        # 添加结果文件
+        git add results/RESULT.md README.md README_CN.md
+        
+        # 提交更改
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "Update analysis results [skip ci]" || exit 0
+        
+        # 强制推送到 stats 分支
+        git push -f origin stats 

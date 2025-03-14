@@ -17,6 +17,10 @@
 
 ![示例输出](./assets/sample_2.webp)
 
+## 📊 最新分析结果
+
+在 [stats 分支](https://github.com/SakuraPuare/github-stats-analyzer/tree/stats/results/RESULT.md) 中查看最新分析结果。
+
 ## ✨ 特性
 
 - **全面分析**：收集代码贡献的详细统计数据

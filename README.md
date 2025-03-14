@@ -16,6 +16,10 @@ This Python program analyzes a GitHub user's repositories to collect comprehensi
 ![Example Output](./assets/sample_1.webp)
 ![Example Output](./assets/sample_2.webp)
 
+## 📊 Latest Analysis Results
+
+View the latest analysis results in the [stats branch](https://github.com/SakuraPuare/github-stats-analyzer/tree/stats/results/RESULT.md).
+
 ## ✨ Features
 
 - **Comprehensive Analysis**: Collects detailed statistics on code contributions
