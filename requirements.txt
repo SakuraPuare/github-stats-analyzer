@@ -1,3 +1,4 @@
 httpx
 tqdm
 python-dotenv
+loguru
