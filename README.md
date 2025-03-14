@@ -11,7 +11,8 @@ This Python program analyzes a GitHub user's repositories to collect comprehensi
 - 🔤 Lines of code per programming language
 - 📚 Detailed repository information (ignoring forked repositories)
 
-![Example Output](https://via.placeholder.com/800x400?text=Example+Output+Screenshot)
+![Example Output](./assets/sample_1.webp)
+![Example Output](./assets/sample_2.webp)
 
 ## ✨ Features
 
