@@ -133,8 +133,8 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
 - `--debug`: Enable debug output for more detailed logging
 - `--include-all`: Include all languages in statistics (don't exclude any)
 - `--access-level`: Choose access level (basic or full)
-  - `basic`: Limited data without token (default)
-  - `full`: Full data with token
+  - `basic`: Limited data without token (default when no token is available)
+  - `full`: Full data with token (default)
 - `--token`: GitHub Personal Access Token (can also be set via GITHUB_TOKEN environment variable)
 - `--max-repos`: Maximum number of repositories to analyze
 - `--max-commits`: Maximum number of commits to analyze per repository

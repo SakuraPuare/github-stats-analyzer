@@ -5,6 +5,7 @@ Configuration for GitHub User Statistics Analyzer
 
 import os
 from typing import Set, Dict, Any
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if it exists
@@ -25,7 +26,8 @@ if GITHUB_TOKEN:
 
 # Configuration
 # These values can be overridden by environment variables
-MAX_CONCURRENT_REPOS = int(os.getenv("MAX_CONCURRENT_REPOS", "10"))  # Maximum number of repositories to process concurrently
+MAX_CONCURRENT_REPOS = int(
+    os.getenv("MAX_CONCURRENT_REPOS", "10"))  # Maximum number of repositories to process concurrently
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t", "yes")  # Set to True to enable debug output
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # Maximum number of retries for HTTP requests
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))  # Initial delay between retries (seconds)
@@ -34,11 +36,13 @@ RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))  # Initial delay between re
 RATE_LIMIT_WITH_TOKEN = 5000  # Requests per hour with token
 RATE_LIMIT_WITHOUT_TOKEN = 60  # Requests per hour without token
 
+
 # Access levels
 class AccessLevel:
     """Access level for GitHub API"""
     BASIC = "basic"
     FULL = "full"
+
 
 # Access level configuration
 ACCESS_LEVEL_CONFIG = {
@@ -75,10 +79,10 @@ EXCLUDED_LANGUAGES: Set[str] = {
 
 # Extensions to consider as non-code files
 NON_CODE_EXTENSIONS: Set[str] = {
-    ".md", ".txt", ".json", ".csv", ".tsv", ".yml", ".yaml", ".xml", ".html", ".css", 
-    ".ipynb", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".ttf", ".woff", 
-    ".woff2", ".eot", ".otf", ".mp3", ".mp4", ".avi", ".mov", ".webm", ".ogg", ".wav", 
-    ".flac", ".zip", ".tar", ".gz", ".7z", ".rar", ".doc", ".docx", ".xls", ".xlsx", 
+    ".md", ".txt", ".json", ".csv", ".tsv", ".yml", ".yaml", ".xml", ".html", ".css",
+    ".ipynb", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".ttf", ".woff",
+    ".woff2", ".eot", ".otf", ".mp3", ".mp4", ".avi", ".mov", ".webm", ".ogg", ".wav",
+    ".flac", ".zip", ".tar", ".gz", ".7z", ".rar", ".doc", ".docx", ".xls", ".xlsx",
     ".ppt", ".pptx", ".odt", ".ods", ".odp", ".pages", ".numbers", ".key"
 }
 
@@ -176,4 +180,4 @@ OUTPUT_CONFIG: Dict[str, Any] = {
     "show_debug": DEBUG,
     "color_output": True,
     "format": "text",  # Options: text, json, csv
-} 
+}

@@ -4,13 +4,16 @@ Data models for GitHub User Statistics Analyzer
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Any
 from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Optional
 
-class AccessLevel:
+
+class AccessLevel(str, Enum):
     """Access level for GitHub API"""
     BASIC = "basic"
     FULL = "full"
+
 
 @dataclass
 class Repository:
@@ -31,6 +34,10 @@ class Repository:
     url: str = ""
     html_url: str = ""
     owner_login: str = ""
+    is_fork: bool = False
+    stars: int = 0
+    languages: Dict[str, int] = field(default_factory=dict)
+
 
 @dataclass
 class CommitFile:
@@ -40,6 +47,7 @@ class CommitFile:
     deletions: int = 0
     changes: int = 0
     status: str = ""
+
 
 @dataclass
 class Commit:
@@ -57,6 +65,7 @@ class Commit:
     html_url: str = ""
     files: List[CommitFile] = field(default_factory=list)
 
+
 @dataclass
 class LanguageStats:
     """Statistics for a programming language"""
@@ -64,25 +73,35 @@ class LanguageStats:
     bytes: int = 0
     lines: int = 0
     percentage: float = 0.0
+    estimated_lines: int = 0
+    excluded: bool = False
 
-@dataclass
+
 class RepoStats:
     """Statistics for a repository"""
-    name: str
-    full_name: str
-    additions: int = 0
-    deletions: int = 0
-    total_lines: int = 0
-    code_additions: int = 0
-    code_deletions: int = 0
-    code_net_change: int = 0
-    languages: Dict[str, int] = field(default_factory=dict)
-    commit_count: int = 0
-    is_fork: bool = False
-    stars: int = 0
-    created_at: Optional[datetime] = None
-    
-    def __post_init__(self):
-        """Initialize derived fields"""
-        if not hasattr(self, 'languages'):
-            self.languages = {} 
+
+    def __init__(self, name, full_name, is_fork=False, stars=0, created_at=None):
+        """Initialize repository statistics.
+        
+        Args:
+            name: Repository name
+            full_name: Full repository name (owner/repo)
+            is_fork: Whether the repository is a fork
+            stars: Number of stars
+            created_at: Repository creation date
+        """
+        self.name = name
+        self.full_name = full_name
+        self.is_fork = is_fork
+        self.stars = stars
+        self.created_at = created_at
+
+        # Initialize statistics
+        self.additions = 0
+        self.deletions = 0
+        self.total_lines = 0
+        self.code_additions = 0
+        self.code_deletions = 0
+        self.code_net_change = 0
+        self.commit_count = 0
+        self.languages = {}

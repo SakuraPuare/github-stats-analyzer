@@ -32,4 +32,4 @@ setup(
             "github-stats=github_stats_analyzer.main:main",
         ],
     },
-) 
+)

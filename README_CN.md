@@ -131,8 +131,8 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
 - `--debug`：启用调试输出，获取更详细的日志
 - `--include-all`：在统计中包含所有语言（不排除任何语言）
 - `--access-level`：选择访问级别（basic 或 full）
-  - `basic`：无 token 的有限数据（默认）
-  - `full`：有 token 的完整数据
+  - `basic`：无 token 的有限数据（当没有 token 时默认）
+  - `full`：有 token 的完整数据（默认）
 - `--token`：GitHub 个人访问令牌（也可以通过 GITHUB_TOKEN 环境变量设置）
 - `--max-repos`：要分析的最大仓库数量
 - `--max-commits`：每个仓库要分析的最大提交数量
