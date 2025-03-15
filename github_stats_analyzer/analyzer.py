@@ -14,14 +14,23 @@ from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
+from rich import box
 
 from github_stats_analyzer.config import (
-    GITHUB_API_URL,
-    MAX_CONCURRENT_REPOS,
+    AccessLevel,
     EXCLUDED_LANGUAGES,
-    ACCESS_LEVEL_CONFIG,
     REPO_LIMITS,
-    COMMIT_LIMITS
+    COMMIT_LIMITS,
+    GITHUB_TOKEN,
+    DEBUG,
+    ERROR_HANDLING_CONFIG,
+    LANGUAGE_DETECTION_CONFIG,
+    MAX_RETRIES,
+    OUTPUT_CONFIG,
+    RETRY_DELAY,
+    TABLE_STYLE,
+    MAX_CONCURRENT_REPOS,
+    GITHUB_API_URL,
 )
 from github_stats_analyzer.logger import logger, TqdmProgressBar
 from github_stats_analyzer.models import (
@@ -318,7 +327,15 @@ class GitHubStatsAnalyzer:
         self.console.print("[bold magenta]Summary Statistics[/bold magenta]")
         
         # Create summary table
-        summary_table = Table(show_header=True, header_style="bold")
+        summary_table = Table(
+            show_header=True, 
+            header_style=TABLE_STYLE.get("header", "bold"),
+            border_style=TABLE_STYLE.get("border", "rounded"),
+            box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
+            padding=TABLE_STYLE.get("padding", (1, 1)),
+            title="Summary",
+            title_style=TABLE_STYLE.get("title_style", "bold magenta")
+        )
         summary_table.add_column("Category", style="cyan")
         summary_table.add_column("Additions", style="green", justify="right")
         summary_table.add_column("Deletions", style="red", justify="right")
@@ -327,15 +344,15 @@ class GitHubStatsAnalyzer:
         # Add rows to summary table
         summary_table.add_row(
             "Total Changes (All Files)",
-            f"{self.total_additions:,}",
-            f"{self.total_deletions:,}",
+            f"[bold green]+{self.total_additions:,}[/bold green]",
+            f"[bold red]-{self.total_deletions:,}[/bold red]",
             f"{self.total_additions - self.total_deletions:,}"
         )
         
         summary_table.add_row(
             "Code Changes (Code Files Only)",
-            f"{self.code_additions:,}",
-            f"{self.code_deletions:,}",
+            f"[bold green]+{self.code_additions:,}[/bold green]",
+            f"[bold red]-{self.code_deletions:,}[/bold red]",
             f"{self.code_additions - self.code_deletions:,}"
         )
         
@@ -348,8 +365,8 @@ class GitHubStatsAnalyzer:
         
         summary_table.add_row(
             f"Filtered Code Changes\n(excluding {excluded_types})",
-            f"{filtered_additions:,}",
-            f"{filtered_deletions:,}",
+            f"[bold green]+{filtered_additions:,}[/bold green]",
+            f"[bold red]-{filtered_deletions:,}[/bold red]",
             f"{filtered_net:,}"
         )
         
@@ -360,7 +377,15 @@ class GitHubStatsAnalyzer:
         self.console.print("\n[bold magenta]Language Statistics (sorted by lines of code)[/bold magenta]")
         
         # Create language table
-        language_table = Table(show_header=True, header_style="bold")
+        language_table = Table(
+            show_header=True, 
+            header_style=TABLE_STYLE.get("header", "bold"),
+            border_style=TABLE_STYLE.get("border", "rounded"),
+            box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
+            padding=TABLE_STYLE.get("padding", (1, 1)),
+            title="Language Statistics",
+            title_style=TABLE_STYLE.get("title_style", "bold magenta")
+        )
         language_table.add_column("Language", style="cyan")
         language_table.add_column("Bytes", style="green", justify="right")
         language_table.add_column("Percentage", style="yellow", justify="right")
@@ -400,7 +425,15 @@ class GitHubStatsAnalyzer:
             self.console.print("\n[bold magenta]Detailed Repository Statistics (sorted by code net change)[/bold magenta]")
             
             # Create repository table
-            repo_table = Table(show_header=True, header_style="bold")
+            repo_table = Table(
+                show_header=True, 
+                header_style=TABLE_STYLE.get("header", "bold"),
+                border_style=TABLE_STYLE.get("border", "rounded"),
+                box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
+                padding=TABLE_STYLE.get("padding", (1, 1)),
+                title="Repository Statistics",
+                title_style=TABLE_STYLE.get("title_style", "bold magenta")
+            )
             repo_table.add_column("Repository", style="cyan")
             repo_table.add_column("Total +/-", style="yellow", justify="right")
             repo_table.add_column("Code +/-", style="green", justify="right")
@@ -418,10 +451,14 @@ class GitHubStatsAnalyzer:
                 # Format language list
                 languages = ", ".join(repo.languages.keys())
                 
+                # Format additions and deletions with more visible styling
+                total_changes = f"[bold green]+{repo.additions:,}[/bold green]/[bold red]-{repo.deletions:,}[/bold red]"
+                code_changes = f"[bold green]+{repo.code_additions:,}[/bold green]/[bold red]-{repo.code_deletions:,}[/bold red]"
+                
                 repo_table.add_row(
                     repo.name,
-                    f"+{repo.additions:,}/-{repo.deletions:,}",
-                    f"+{repo.code_additions:,}/-{repo.code_deletions:,}",
+                    total_changes,
+                    code_changes,
                     f"{repo.stars:,}",
                     created_at,
                     languages

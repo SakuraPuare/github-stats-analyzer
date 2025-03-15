@@ -114,6 +114,10 @@ TABLE_STYLE = {
     "header": "bold cyan",
     "row": "white",
     "footer": "bold green",
+    "border": "blue",
+    "box": "ROUNDED",
+    "padding": (1, 1),
+    "title_style": "bold magenta",
 }
 
 # Repository statistics configuration
