@@ -76,8 +76,16 @@ run_test "exclude_languages" "python -m github_stats_analyzer.main octocat --exc
 run_test "code_changes_stats" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Code +/-"
 run_test "code_net_change" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Net Change"
 
+# 测试新增的CLI选项
+run_test "max_concurrent_repos" "python -m github_stats_analyzer.main octocat --max-repos 2 --max-concurrent-repos 5" "max_concurrent_repos=5"
+run_test "max_retries" "python -m github_stats_analyzer.main octocat --max-repos 1 --max-retries 8" "max_retries=8"
+run_test "retry_delay" "python -m github_stats_analyzer.main octocat --max-repos 1 --retry-delay 2.5" "retry_delay=2.5"
+
 # 测试组合参数
 run_test "combined_params" "python -m github_stats_analyzer.main octocat -o json --max-repos 1 --max-commits 5 --include-all" "\"username\": \"octocat\""
+
+# 测试新增选项的组合
+run_test "combined_new_options" "python -m github_stats_analyzer.main octocat --max-repos 1 --max-concurrent-repos 15 --max-retries 6 --retry-delay 3.0" "max_concurrent_repos=15, max_retries=6, retry_delay=3.0"
 
 # 生成测试报告
 echo -e "${YELLOW}生成测试报告...${NC}"

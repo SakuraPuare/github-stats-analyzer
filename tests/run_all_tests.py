@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入测试模块
 from tests.test_analyzer import TestGitHubStatsAnalyzer, TestGitHubAPIClient
+from tests.test_cli import TestCLI
+from tests.test_config import TestConfig
 
 def run_unit_tests():
     """运行单元测试"""
@@ -32,6 +34,8 @@ def run_unit_tests():
     loader = unittest.TestLoader()
     suite.addTest(loader.loadTestsFromTestCase(TestGitHubStatsAnalyzer))
     suite.addTest(loader.loadTestsFromTestCase(TestGitHubAPIClient))
+    suite.addTest(loader.loadTestsFromTestCase(TestCLI))
+    suite.addTest(loader.loadTestsFromTestCase(TestConfig))
     
     # 运行测试
     runner = unittest.TextTestRunner(verbosity=2)
