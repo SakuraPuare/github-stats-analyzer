@@ -86,7 +86,7 @@ class GitHubStatsAnalyzer:
         self.api_client = GitHubAPIClient(access_level=access_level)
 
         # Initialize console for rich output
-        self.console = Console()
+        self.console = Console( highlight=False)  # Set console width to 100 characters
 
     async def analyze(self):
         """Analyze the user's repositories."""
@@ -113,31 +113,31 @@ class GitHubStatsAnalyzer:
         """
         logger.info(f"Fetching repositories for user {self.username}")
 
+        # Check if the token belongs to the authenticated user
+        is_owner = await self.api_client.is_token_owner(self.username)
+        logger.info(f"Token belongs to user {self.username}: {is_owner}")
+
         # Get repositories based on access level
-        if self.access_level == AccessLevel.BASIC:
-            # Basic access: only public repos, limited number
+        with TqdmProgressBar(total=1, desc=f"Fetching repositories for {self.username}") as progress:
             repos = await self.api_client.get_user_repos(self.username)
-            # Apply repository limit for basic access
-            repos = repos[:self.max_repos]
-        else:
-            # Full access: all repos including private ones
-            repos = await self.api_client.get_user_repos(self.username, include_private=True)
-            # Apply repository limit for full access
-            repos = repos[:self.max_repos]
+            progress.update(1)
+        
+        # Apply repository limit
+        repos = repos[:self.max_repos]
 
         # Filter repositories based on access level
         filtered_repos = []
         for repo in repos:
-            # Skip forks in basic access mode
-            if self.access_level == AccessLevel.BASIC and repo.fork:
+            # Skip forks in basic access mode (unless token owner)
+            if self.access_level == AccessLevel.BASIC and repo.fork and not is_owner:
                 continue
 
-            # Skip archived repositories in basic access mode
-            if self.access_level == AccessLevel.BASIC and repo.archived:
+            # Skip archived repositories in basic access mode (unless token owner)
+            if self.access_level == AccessLevel.BASIC and repo.archived and not is_owner:
                 continue
 
-            # Skip private repositories in basic access mode (should already be filtered by API)
-            if self.access_level == AccessLevel.BASIC and repo.private:
+            # Skip private repositories in basic access mode (unless token owner)
+            if self.access_level == AccessLevel.BASIC and repo.private and not is_owner:
                 continue
 
             filtered_repos.append(repo)
@@ -153,30 +153,19 @@ class GitHubStatsAnalyzer:
         # Get max_concurrent_repos from environment variable or use default
         max_concurrent_repos = int(os.getenv("MAX_CONCURRENT_REPOS", MAX_CONCURRENT_REPOS))
 
-        # Create a semaphore to limit concurrent processing
-        semaphore = asyncio.Semaphore(max_concurrent_repos)
-
-        # Process repositories concurrently with progress bar
+        # Process repositories with progress bar
         with TqdmProgressBar(total=len(repos), desc="Processing repositories") as progress:
-            tasks = []
-            for repo in repos:
-                task = asyncio.create_task(self._process_repo_with_semaphore(repo, semaphore, progress))
-                tasks.append(task)
-
-            # Wait for all tasks to complete
-            await asyncio.gather(*tasks)
-
-    async def _process_repo_with_semaphore(self, repo: Repository, semaphore: asyncio.Semaphore, progress):
-        """Process a repository with semaphore to limit concurrency.
-        
-        Args:
-            repo: Repository to process
-            semaphore: Semaphore to limit concurrency
-            progress: Progress bar
-        """
-        async with semaphore:
-            await self.process_repo(repo)
-            progress.update(1)
+            # Create tasks for all repositories
+            async def process_repo_task(repo):
+                await self.process_repo(repo)
+                progress.update(1)
+            
+            tasks = [process_repo_task(repo) for repo in repos]
+            
+            # Process in batches of max_concurrent_repos
+            for i in range(0, len(tasks), max_concurrent_repos):
+                batch = tasks[i:i + max_concurrent_repos]
+                await asyncio.gather(*batch)
 
     async def process_repo(self, repo: Repository):
         """Process a repository.
@@ -196,23 +185,24 @@ class GitHubStatsAnalyzer:
         )
 
         try:
-            # Analyze commits
-            await self.analyze_commits(repo, repo_stats)
+            # Check if the repository is owned by the user
+            is_user_repo = repo.owner_login == self.username
+            logger.info(f"Repository {repo.full_name} is {'owned' if is_user_repo else 'not owned'} by {self.username}")
+            
+            # For all repositories, we'll only count the user's contributions
+            # This is handled in analyze_commits by filtering commits by author
 
-            # Get repository languages
-            await self.get_repo_languages(repo, repo_stats)
+            # Analyze commits and get repository languages concurrently
+            await asyncio.gather(
+                self.analyze_commits(repo, repo_stats),
+                self.get_repo_languages(repo, repo_stats)
+            )
 
             # Add repository statistics
             self.repo_stats.append(repo_stats)
 
-            # Update total statistics
-            self.total_additions += repo_stats.additions
-            self.total_deletions += repo_stats.deletions
-            self.total_lines += repo_stats.total_lines
-
-            # Update code statistics
-            self.code_additions += repo_stats.code_additions
-            self.code_deletions += repo_stats.code_deletions
+            # Debug output for repository additions and deletions
+            logger.debug(f"Repository {repo.full_name}: +{repo_stats.additions}/-{repo_stats.deletions} (Total), +{repo_stats.code_additions}/-{repo_stats.code_deletions} (Code)")
 
             logger.info(f"Repository {repo.full_name} processed successfully")
         except Exception as e:
@@ -229,49 +219,69 @@ class GitHubStatsAnalyzer:
         logger.info(f"Analyzing commits for repository {repo.full_name}")
 
         try:
-            # Get commits
-            commits = await self.api_client.get_repo_commits(repo.full_name, self.max_commits)
+            # Get commits, filtering by the current user directly from the API
+            commits = await self.api_client.get_repo_commits(
+                repo.full_name, 
+                self.max_commits,
+                author=self.username
+            )
+            
+            logger.info(f"Found {len(commits)} commits by user {self.username} in repository {repo.full_name}")
 
             # Update commit count
             repo_stats.commit_count = len(commits)
-
-            logger.info(f"Found {repo_stats.commit_count} commits in repository {repo.full_name}")
         except Exception as e:
             logger.error(f"Error getting commits for {repo.full_name}: {e}")
             self.failed_repositories.append(repo.full_name)
             return
 
-        # Process each commit
-        for commit in commits:
-            # Get commit details
-            try:
-                commit_detail = await self.api_client.get_commit_detail(repo.full_name, commit.sha)
+        # Process commits concurrently using gather with tqdm progress bar
+        with TqdmProgressBar(total=len(commits), desc=f"Processing commits for {repo.name}") as progress:
+            async def process_commit(commit):
+                try:
+                    commit_detail = await self.api_client.get_commit_detail(repo.full_name, commit.sha)
+                    
+                    # Double-check that the commit is authored by the user
+                    if commit_detail.author_login != self.username:
+                        progress.update(1)
+                        return None
+                    
+                    progress.update(1)
+                    return commit_detail
+                except Exception as e:
+                    logger.error(f"Error getting commit details for {commit.sha}: {e}")
+                    progress.update(1)
+                    return None
+            
+            # Use gather to process all commits concurrently
+            commit_details = await asyncio.gather(*[process_commit(commit) for commit in commits])
+        
+        # Filter out None values (failed commits)
+        commit_details = [detail for detail in commit_details if detail is not None]
+        
+        # Process commit details
+        for commit_detail in commit_details:
+            # Update repository statistics
+            repo_stats.additions += commit_detail.additions
+            repo_stats.deletions += commit_detail.deletions
+            repo_stats.total_lines += commit_detail.additions + commit_detail.deletions
 
-                # Update statistics
-                repo_stats.additions += commit_detail.additions
-                repo_stats.deletions += commit_detail.deletions
-                repo_stats.total_lines += commit_detail.additions + commit_detail.deletions
+            # Update repository code statistics by checking file extensions
+            for file in commit_detail.files:
+                if is_code_file(file.filename):
+                    repo_stats.code_additions += file.additions
+                    repo_stats.code_deletions += file.deletions
 
-                # Update code statistics by checking file extensions
-                for file in commit_detail.files:
-                    if is_code_file(file.filename):
-                        repo_stats.code_additions += file.additions
-                        repo_stats.code_deletions += file.deletions
+            # Update global statistics
+            self.total_additions += commit_detail.additions
+            self.total_deletions += commit_detail.deletions
+            self.total_lines += commit_detail.additions + commit_detail.deletions
 
-                # Update global statistics
-                self.total_additions += commit_detail.additions
-                self.total_deletions += commit_detail.deletions
-                self.total_lines += commit_detail.additions + commit_detail.deletions
-
-                # Update global code statistics
-                for file in commit_detail.files:
-                    if is_code_file(file.filename):
-                        self.code_additions += file.additions
-                        self.code_deletions += file.deletions
-            except Exception as e:
-                logger.error(f"Error getting commit details for {commit.sha}: {e}")
-                # Continue with next commit
-                continue
+            # Update global code statistics
+            for file in commit_detail.files:
+                if is_code_file(file.filename):
+                    self.code_additions += file.additions
+                    self.code_deletions += file.deletions
 
         # Calculate net code change
         repo_stats.code_net_change = repo_stats.code_additions - repo_stats.code_deletions
@@ -286,8 +296,10 @@ class GitHubStatsAnalyzer:
         logger.info(f"Getting language statistics for repository {repo.full_name}")
 
         try:
-            # Get language statistics
-            languages = await self.api_client.get_repo_languages(repo.full_name)
+            # Get language statistics with progress bar
+            with TqdmProgressBar(total=1, desc=f"Fetching languages for {repo.name}") as progress:
+                languages = await self.api_client.get_repo_languages(repo.full_name)
+                progress.update(1)
 
             # Update repository statistics
             repo_stats.languages = languages
@@ -306,10 +318,12 @@ class GitHubStatsAnalyzer:
         # Calculate total bytes
         total_bytes = sum(self.language_stats.values())
 
-        # Calculate percentages
-        for language, bytes_count in self.language_stats.items():
-            percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
-            logger.debug(f"Language {language}: {bytes_count} bytes, {percentage:.2f}%")
+        # Calculate percentages with progress bar
+        with TqdmProgressBar(total=len(self.language_stats), desc="Calculating language statistics") as progress:
+            for language, bytes_count in self.language_stats.items():
+                percentage = (bytes_count / total_bytes) * 100 if total_bytes > 0 else 0
+                logger.debug(f"Language {language}: {bytes_count} bytes, {percentage:.2f}%")
+                progress.update(1)
 
         # Calculate code net change
         self.code_net_change = self.code_additions - self.code_deletions
@@ -319,11 +333,13 @@ class GitHubStatsAnalyzer:
         self.filtered_deletions = 0
 
         # Only include repositories that don't have large changes or aren't dominated by excluded languages
-        for repo in self.repo_stats:
-            # Check if repository should be included in filtered stats
-            if not should_exclude_repo(repo.name, repo.languages, self.excluded_languages):
-                self.filtered_additions += repo.code_additions
-                self.filtered_deletions += repo.code_deletions
+        with TqdmProgressBar(total=len(self.repo_stats), desc="Calculating filtered statistics") as progress:
+            for repo in self.repo_stats:
+                # Check if repository should be included in filtered stats
+                if not should_exclude_repo(repo.name, repo.languages, self.excluded_languages):
+                    self.filtered_additions += repo.code_additions
+                    self.filtered_deletions += repo.code_deletions
+                progress.update(1)
 
         # Calculate filtered net change
         self.filtered_net_change = self.filtered_additions - self.filtered_deletions
@@ -358,12 +374,15 @@ class GitHubStatsAnalyzer:
             header_style=TABLE_STYLE.get("header", "bold"),
             border_style=TABLE_STYLE.get("border", "rounded"),
             box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
-            padding=TABLE_STYLE.get("padding", (1, 1))
+            # padding=TABLE_STYLE.get("padding", (1, 2)),
+              # Set a fixed width for the table
+            show_lines=True,  # Show lines between rows for better readability
+            expand=True  # Allow table to expand to fit content
         )
-        summary_table.add_column("Category", style="cyan")
-        summary_table.add_column("Additions", style="green", justify="right")
-        summary_table.add_column("Deletions", style="red", justify="right")
-        summary_table.add_column("Net Change", style="yellow", justify="right")
+        summary_table.add_column("Category", style="cyan",  no_wrap=False)
+        summary_table.add_column("Additions", style="green", justify="right",  no_wrap=False)
+        summary_table.add_column("Deletions", style="red", justify="right",  no_wrap=False)
+        summary_table.add_column("Net Change", style="yellow", justify="right",  no_wrap=False)
 
         # Add rows to summary table
         summary_table.add_row(
@@ -381,7 +400,7 @@ class GitHubStatsAnalyzer:
         )
 
         # Calculate filtered code changes (excluding certain file types)
-        excluded_types = "CSS, CSV, HTML, JSON, Jupyter Notebook, Markdown, Mathematica, SVG, TSV, Text, XML, YAML, reStructuredText"
+        excluded_types = "CSS, HTML, JSON, MD, Jupyter, SVG, XML, YAML, etc."
 
         summary_table.add_row(
             f"Filtered Code Changes\n(excluding {excluded_types})",
@@ -412,12 +431,15 @@ class GitHubStatsAnalyzer:
             header_style=TABLE_STYLE.get("header", "bold"),
             border_style=TABLE_STYLE.get("border", "rounded"),
             box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
-            padding=TABLE_STYLE.get("padding", (1, 1))
+            padding=TABLE_STYLE.get("padding", (1, 2)),
+            #   # Set a fixed width for the table
+            show_lines=True,  # Show lines between rows for better readability
+            expand=True  # Allow table to expand to fit content
         )
-        language_table.add_column("Language", style="cyan")
-        language_table.add_column("Bytes", style="green", justify="right")
-        language_table.add_column("Percentage", style="yellow", justify="right")
-        language_table.add_column("Est. Lines", style="blue", justify="right")
+        language_table.add_column("Language", style="cyan",  no_wrap=False)
+        language_table.add_column("Bytes", style="green", justify="right",  no_wrap=False)
+        language_table.add_column("Percentage", style="yellow", justify="right",  no_wrap=False)
+        language_table.add_column("Est. Lines", style="blue", justify="right",  no_wrap=False)
 
         # Sort languages by bytes
         sorted_languages = sorted(self.language_stats.items(), key=lambda x: x[1], reverse=True)
@@ -460,14 +482,17 @@ class GitHubStatsAnalyzer:
                 header_style=TABLE_STYLE.get("header", "bold"),
                 border_style=TABLE_STYLE.get("border", "rounded"),
                 box=getattr(box, TABLE_STYLE.get("box", "ROUNDED")),
-                padding=TABLE_STYLE.get("padding", (1, 1))
+                padding=TABLE_STYLE.get("padding", (1, 2)),
+                #   # Set a fixed width for the table
+                show_lines=True,  # Show lines between rows for better readability
+                expand=True  # Allow table to expand to fit content
             )
-            repo_table.add_column("Repository", style="cyan")
-            repo_table.add_column("Total +/-", style="yellow", justify="right")
-            repo_table.add_column("Code +/-", style="green", justify="right")
-            repo_table.add_column("Stars", style="magenta", justify="right")
-            repo_table.add_column("Created", style="blue", justify="right")
-            repo_table.add_column("Languages", style="cyan")
+            repo_table.add_column("Repository", style="cyan",  no_wrap=False)
+            repo_table.add_column("Total +/-", style="yellow", justify="right",  no_wrap=False)
+            repo_table.add_column("Code +/-", style="green", justify="right",  no_wrap=False)
+            repo_table.add_column("Stars", style="magenta", justify="right",  no_wrap=False)
+            repo_table.add_column("Created", style="blue", justify="right",  no_wrap=False)
+            repo_table.add_column("Languages", style="cyan",  no_wrap=False)
 
             # Sort repositories by code net change
             sorted_repos = sorted(self.repo_stats, key=lambda x: (x.code_additions - x.code_deletions), reverse=True)
@@ -477,11 +502,15 @@ class GitHubStatsAnalyzer:
                 created_at = format_datetime(repo.created_at) if repo.created_at else "Unknown"
 
                 # Format language list
-                languages = ", ".join(repo.languages.keys())
+                languages_list = list(repo.languages.keys())
+                if len(languages_list) > 3:
+                    languages = ", ".join(languages_list[:3]) + "..."
+                else:
+                    languages = ", ".join(languages_list)
 
-                # Mark forked repositories with an asterisk
-                repo_name = f"{repo.name} *" if repo.is_fork else repo.name
-
+                # Mark forked repositories with an asterisk and use full_name (author/project) format
+                repo_name = f"{repo.full_name} *" if repo.is_fork else repo.full_name
+                
                 # Format additions and deletions
                 total_changes = f"+{repo.additions:,}/-{repo.deletions:,}"
                 code_changes = f"+{repo.code_additions:,}/-{repo.code_deletions:,}"
@@ -535,7 +564,7 @@ class GitHubStatsAnalyzer:
         # Add repository statistics
         for repo in self.repo_stats:
             repo_data = {
-                "name": repo.name,
+                "name": repo.full_name,  # Use full_name as the display name
                 "full_name": repo.full_name,
                 "additions": repo.additions,
                 "deletions": repo.deletions,
@@ -578,7 +607,7 @@ class GitHubStatsAnalyzer:
         writer.writerow(["Code Changes (Code Files Only)", self.code_additions, self.code_deletions,
                          self.code_additions - self.code_deletions])
 
-        excluded_types = "CSS, CSV, HTML, JSON, Jupyter Notebook, Markdown, Mathematica, SVG, TSV, Text, XML, YAML, reStructuredText"
+        excluded_types = "CSS, HTML, JSON, MD, Jupyter, SVG, XML, YAML, etc."
         writer.writerow(
             [f"Filtered Code Changes (excluding {excluded_types})", self.filtered_additions, self.filtered_deletions,
              self.filtered_net_change])
@@ -621,10 +650,14 @@ class GitHubStatsAnalyzer:
             # Write repository rows
             for repo in sorted_repos:
                 created_at = format_datetime(repo.created_at) if repo.created_at else "Unknown"
-                languages = ", ".join(repo.languages.keys())
+                languages_list = list(repo.languages.keys())
+                if len(languages_list) > 3:
+                    languages = ", ".join(languages_list[:3]) + "..."
+                else:
+                    languages = ", ".join(languages_list)
 
                 writer.writerow([
-                    repo.name,
+                    repo.full_name,
                     f"+{repo.additions}/-{repo.deletions}",
                     f"+{repo.code_additions}/-{repo.code_deletions}",
                     repo.stars,

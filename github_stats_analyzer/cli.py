@@ -12,7 +12,7 @@ from github_stats_analyzer.config import AccessLevel
 from github_stats_analyzer.logger import logger
 
 
-def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any]:
+def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, str, Any]:
     """Parse command line arguments.
     
     Returns:
@@ -22,6 +22,7 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any
             - excluded_languages: Set of languages to exclude from statistics
             - github_token: GitHub Personal Access Token
             - access_level: Access level to use (basic or full)
+            - log_level: Logging level
             - args: Parsed arguments
     """
     parser = argparse.ArgumentParser(
@@ -49,6 +50,12 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any
         "-d", "--debug",
         action="store_true",
         help="Enable debug output"
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging level"
     )
     parser.add_argument(
         "--include-all",
@@ -89,7 +96,7 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any
     parser.add_argument(
         "--max-concurrent-repos",
         type=int,
-        default=5,
+        default=3,
         help="Maximum number of repositories to process concurrently"
     )
     parser.add_argument(
@@ -118,6 +125,9 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any
     # Get debug mode
     debug_mode = args.debug or os.environ.get("DEBUG") == "1"
 
+    # Get log level - if debug mode is enabled, override to DEBUG
+    log_level = "DEBUG" if debug_mode else args.log_level
+
     # Get excluded languages
     excluded_languages = set(args.exclude_languages) if args.exclude_languages else None
     if args.include_all:
@@ -131,8 +141,11 @@ def parse_args() -> Tuple[str, bool, Optional[Set[str]], Optional[str], str, Any
     if access_level == AccessLevel.FULL and not github_token:
         logger.warning("No GitHub token found. Downgrading access level to BASIC.")
         access_level = AccessLevel.BASIC
+    elif github_token:
+        logger.info(f"Using access level: {access_level}")
+        # Note: We'll check if the token belongs to the user in the analyzer
 
-    return username, debug_mode, excluded_languages, github_token, access_level, args
+    return username, debug_mode, excluded_languages, github_token, access_level, log_level, args
 
 
 def validate_environment(github_token: Optional[str] = None) -> None:

@@ -19,10 +19,12 @@
 - 📈 所有仓库的总添加和删除行数（包括fork的仓库，但只统计用户自己的贡献）
 - 🔤 每种编程语言的代码行数
 - 📚 详细的仓库信息
+- 📊 多种输出格式（文本、JSON、CSV）
 
-![示例输出](./assets/sample_1.webp)
-
-![示例输出](./assets/sample_2.webp)
+<div align="center">
+  <img src="./assets/sample_1.webp" width="49%" alt="Example Output 1" />
+  <img src="./assets/sample_2.webp" width="49%" alt="Example Output 2" />
+</div>
 
 ## 📊 最新分析结果
 
@@ -36,10 +38,12 @@
 - **精确代码行统计**：通过直接分析GitHub API的提交数据，精确测量实际代码行数
 - **并行处理**：高效地并发处理多个仓库
 - **丰富输出**：美观的控制台输出，带有表格和颜色
+- **多种输出格式**：支持文本、JSON和CSV输出格式
 - **详细日志**：用于调试的全面日志记录
 - **访问级别**：支持基础（无token）和完整（有token）两种访问模式
 - **灵活的Token配置**：支持多种方式提供GitHub token
 - **全面测试**：查看我们的[测试结果和测试流程](https://github.com/SakuraPuare/github-stats-analyzer/blob/test-results/test_results/test_report.md)以确保质量
+- **可配置分析**：通过各种命令行选项控制分析的深度和范围
 
 ## 🔧 要求
 
@@ -125,7 +129,7 @@ python main.py <github_username>
 程序支持以下命令行选项：
 
 ```bash
-github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY]
+github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY] [--output {text|json|csv}] [--log-level {DEBUG|INFO|WARNING|ERROR|CRITICAL}]
 ```
 
 - `--debug`：启用调试输出，获取更详细的日志
@@ -136,9 +140,12 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
 - `--token`：GitHub 个人访问令牌（也可以通过 GITHUB_TOKEN 环境变量设置）
 - `--max-repos`：要分析的最大仓库数量
 - `--max-commits`：每个仓库要分析的最大提交数量
-- `--max-concurrent-repos`：并发处理的最大仓库数量（默认：10）
+- `--max-concurrent-repos`：并发处理的最大仓库数量（默认：3）
 - `--max-retries`：HTTP 请求的最大重试次数（默认：3）
 - `--retry-delay`：重试之间的初始延迟秒数（默认：1.0）
+- `--output`：输出格式（text、json、csv）（默认：text）
+- `--log-level`：设置日志级别（DEBUG、INFO、WARNING、ERROR、CRITICAL）（默认：INFO）
+- `--exclude-languages`：要从统计中排除的语言（空格分隔的列表）
 
 ### 访问级别
 
@@ -156,8 +163,8 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
 
 #### 完整访问（需要 Token）
 - 可访问所有仓库（公开和私有）
-- 仓库数量无限制
-- 提交数量无限制
+- 仓库数量无限制（默认：1000）
+- 提交数量无限制（默认：1000）
 - 完整统计
 - 可访问私有仓库
 - 分析 fork 仓库
@@ -202,6 +209,22 @@ asyncio.run(analyze_user("octocat", AccessLevel.FULL))
 - 所有仓库的总添加和删除行数
 - 按代码行数排序的语言统计
 - 仓库列表，包含星标数和创建日期（完整访问模式）
+
+### 输出格式
+
+程序支持三种输出格式：
+
+#### 文本（默认）
+- 丰富的控制台输出，带有表格和颜色
+- 详细的统计和仓库信息
+
+#### JSON
+- 结构化的JSON输出，用于程序化使用
+- 包含所有统计和仓库信息
+
+#### CSV
+- 逗号分隔的值，便于导入到电子表格
+- 包含所有统计和仓库信息
 
 ## 📝 注意事项
 

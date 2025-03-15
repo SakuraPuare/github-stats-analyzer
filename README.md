@@ -20,6 +20,7 @@ This Python program analyzes a GitHub user's repositories to collect comprehensi
 - 📈 Total additions and deletions across all repositories (including forks, but only counting user's own contributions)
 - 🔤 Lines of code per programming language
 - 📚 Detailed repository information
+- 📊 Multiple output formats (text, JSON, CSV)
 
 <div align="center">
   <img src="./assets/sample_1.webp" width="49%" alt="Example Output 1" />
@@ -38,10 +39,12 @@ View the latest analysis results in the [stats branch](https://github.com/Sakura
 - **Accurate Line Counting**: Precisely measures actual code lines by analyzing commit data directly from GitHub's API
 - **Parallel Processing**: Efficiently processes multiple repositories concurrently
 - **Rich Output**: Beautiful console output with tables and colors
+- **Multiple Output Formats**: Support for text, JSON, and CSV output formats
 - **Detailed Logging**: Comprehensive logging for debugging
 - **Access Levels**: Supports both basic (no token) and full (with token) access modes
 - **Flexible Token Configuration**: Support for multiple ways to provide GitHub token
 - **Extensive Testing**: View our [test results and testing pipeline](https://github.com/SakuraPuare/github-stats-analyzer/blob/test-results/test_results/test_report.md) for quality assurance
+- **Configurable Analysis**: Control the depth and scope of analysis with various command-line options
 
 ## 🔧 Requirements
 
@@ -127,7 +130,7 @@ python main.py <github_username>
 The program supports the following command line options:
 
 ```bash
-github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY]
+github-stats <github_username> [--debug] [--include-all] [--access-level {basic|full}] [--token TOKEN] [--max-repos MAX_REPOS] [--max-commits MAX_COMMITS] [--max-concurrent-repos MAX_CONCURRENT_REPOS] [--max-retries MAX_RETRIES] [--retry-delay RETRY_DELAY] [--output {text|json|csv}] [--log-level {DEBUG|INFO|WARNING|ERROR|CRITICAL}]
 ```
 
 - `--debug`: Enable debug output for more detailed logging
@@ -138,9 +141,12 @@ github-stats <github_username> [--debug] [--include-all] [--access-level {basic|
 - `--token`: GitHub Personal Access Token (can also be set via GITHUB_TOKEN environment variable)
 - `--max-repos`: Maximum number of repositories to analyze
 - `--max-commits`: Maximum number of commits to analyze per repository
-- `--max-concurrent-repos`: Maximum number of repositories to process concurrently (default: 10)
+- `--max-concurrent-repos`: Maximum number of repositories to process concurrently (default: 3)
 - `--max-retries`: Maximum number of retries for HTTP requests (default: 3)
 - `--retry-delay`: Initial delay between retries in seconds (default: 1.0)
+- `--output`: Output format (text, json, csv) (default: text)
+- `--log-level`: Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) (default: INFO)
+- `--exclude-languages`: Languages to exclude from statistics (space-separated list)
 
 ### Access Levels
 
@@ -158,8 +164,8 @@ The program supports two access levels:
 
 #### Full Access (Token Required)
 - Access to all repositories (public and private)
-- No limit on number of repositories
-- No limit on number of commits
+- No limit on number of repositories (default: 1000)
+- No limit on number of commits (default: 1000)
 - Complete statistics
 - Private repository access
 - Fork analysis
@@ -204,6 +210,22 @@ The program will display:
 - Total additions and deletions across all repositories
 - Language statistics sorted by lines of code
 - List of repositories with star count and creation date (in full access mode)
+
+### Output Formats
+
+The program supports three output formats:
+
+#### Text (Default)
+- Rich console output with tables and colors
+- Detailed statistics and repository information
+
+#### JSON
+- Structured JSON output for programmatic use
+- Contains all statistics and repository information
+
+#### CSV
+- Comma-separated values for easy import into spreadsheets
+- Contains all statistics and repository information
 
 ## 📝 Notes
 

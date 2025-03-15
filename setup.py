@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="github-stats-analyzer",
-    version="0.1.0.post2",
+    version="1.0.0",
     author="SakuraPuare",
     author_email="sakurapuare@sakurapuare.com",
     description="Analyze GitHub user statistics",

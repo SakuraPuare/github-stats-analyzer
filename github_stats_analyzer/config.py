@@ -27,7 +27,7 @@ if GITHUB_TOKEN:
 # Configuration
 # These values can be overridden by environment variables
 MAX_CONCURRENT_REPOS = int(
-    os.getenv("MAX_CONCURRENT_REPOS", "10"))  # Maximum number of repositories to process concurrently
+    os.getenv("MAX_CONCURRENT_REPOS", "3"))  # Maximum number of repositories to process concurrently
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t", "yes")  # Set to True to enable debug output
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # Maximum number of retries for HTTP requests
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", "1.0"))  # Initial delay between retries (seconds)
@@ -120,7 +120,7 @@ TABLE_STYLE = {
     "footer": "bold green",
     "border": "blue",
     "box": "ROUNDED",
-    "padding": (1, 1),
+    "padding": (0, 1),
     "title_style": "bold magenta",
 }
 

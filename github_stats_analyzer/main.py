@@ -40,10 +40,10 @@ from github_stats_analyzer.logger import logger, configure_logger
 async def main_async():
     """Main entry point for the application."""
     # Parse command line arguments
-    username, debug_mode, excluded_languages, github_token, access_level, args = parse_args()
+    username, debug_mode, excluded_languages, github_token, access_level, log_level, args = parse_args()
 
-    # Configure logger based on debug mode
-    configure_logger(debug_mode)
+    # Configure logger based on log level
+    configure_logger(log_level)
 
     logger.info("GitHub Statistics Analyzer starting")
 
