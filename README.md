@@ -12,9 +12,7 @@
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/pulls)
 [![GitHub last commit](https://img.shields.io/github/last-commit/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/commits/main)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SakuraPuare/github-stats-analyzer)](https://github.com/SakuraPuare/github-stats-analyzer/releases)
-[![Codecov](https://codecov.io/gh/SakuraPuare/github-stats-analyzer/branch/main/graph/badge.svg)](https://codecov.io/gh/SakuraPuare/github-stats-analyzer)
-[![Documentation Status](https://readthedocs.org/projects/github-stats-analyzer/badge/?version=latest)](https://github-stats-analyzer.readthedocs.io/en/latest/?badge=latest)
-[![wakatime](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632.svg)](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/b599418e-e4fa-4c9a-8624-b9c87c684632)
+[![wakatime](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/3e305dba-c3e1-4bac-a6d3-0f18b37e4d97.svg)](https://wakatime.com/badge/user/6b4b61d2-7698-48db-9196-f67e42f0658d/project/3e305dba-c3e1-4bac-a6d3-0f18b37e4d97)
 
 *Read this in [中文 (Chinese)](README_CN.md).*
 
