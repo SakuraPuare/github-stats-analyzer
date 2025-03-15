@@ -165,13 +165,16 @@ jobs:
     
     - name: Create test results branch
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
         git checkout -b test-results
-        mkdir -p test_results
+        
         cp test_report.md test_results/
         cp json_output.txt test_results/
         cp csv_output.txt test_results/
+
         git add -f test_results/
+
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
         git commit -m "Update test results [skip ci]" || exit 0
+        
         git push -f origin test-results 
