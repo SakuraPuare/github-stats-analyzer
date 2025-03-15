@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
 from rich import box
+import io
 
 from github_stats_analyzer.config import (
     AccessLevel,
@@ -521,8 +522,11 @@ class GitHubStatsAnalyzer:
     
     def _print_csv_results(self):
         """Print results in CSV format."""
-        # Create CSV writer
-        writer = csv.writer(sys.stdout)
+        # Use StringIO to capture CSV output
+        output_buffer = io.StringIO()
+        
+        # Create CSV writer that writes to the buffer
+        writer = csv.writer(output_buffer, lineterminator='\n')
         
         # Write summary
         writer.writerow(["GitHub Statistics for:", self.username])
@@ -579,6 +583,9 @@ class GitHubStatsAnalyzer:
                     created_at,
                     languages
                 ])
+        
+        # Print the entire CSV output at once
+        print(output_buffer.getvalue(), end='')
     
     async def close(self):
         """Close the API client."""

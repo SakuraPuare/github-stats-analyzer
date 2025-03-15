@@ -73,7 +73,35 @@ async def main_async():
     
     try:
         await analyzer.analyze()
-        analyzer.print_results()
+        
+        # For CSV and JSON output, redirect to a file to avoid mixing with log messages
+        if args.output in ["csv", "json"]:
+            import tempfile
+            
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+                temp_filename = temp_file.name
+                
+                # Redirect stdout to the temporary file
+                original_stdout = sys.stdout
+                sys.stdout = temp_file
+                
+                # Print results to the temporary file
+                analyzer.print_results()
+                
+                # Restore stdout
+                sys.stdout = original_stdout
+            
+            # Read the temporary file and print only the relevant content
+            with open(temp_filename, 'r') as temp_file:
+                content = temp_file.read()
+                print(content, end='')
+                
+            # Delete the temporary file
+            os.unlink(temp_filename)
+        else:
+            analyzer.print_results()
+            
         logger.success(f"Analysis for user {username} completed successfully")
     except Exception as e:
         handle_error(e, username)

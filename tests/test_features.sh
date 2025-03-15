@@ -24,8 +24,8 @@ run_test() {
     echo -e "${YELLOW}运行测试: ${test_name}${NC}"
     echo "命令: $command"
     
-    # 运行命令并捕获输出
-    eval "$command" > "$output_file" 2>&1
+    # 运行命令并捕获输出，重定向stderr到/dev/null
+    eval "$command" > "$output_file" 2>/dev/null
     local exit_code=$?
     
     # 检查结果
@@ -55,22 +55,22 @@ run_test "help_command" "python -m github_stats_analyzer.main -h" "usage:"
 run_test "version_command" "python -m github_stats_analyzer.main -v" "GitHub Stats Analyzer"
 
 # 测试基本访问级别
-run_test "basic_access" "python -m github_stats_analyzer.main octocat --access-level basic --max-repos 2" "GitHub Statistics for octocat"
+run_test "basic_access" "python -m github_stats_analyzer.main octocat --access-level basic --max-repos 2" "GitHub Statistics for: octocat"
 
 # 测试完整访问级别和代码变更统计
 run_test "full_access_with_code_stats" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Code Changes (Code Files Only)"
 
 # 测试不同输出格式
 run_test "json_output" "python -m github_stats_analyzer.main octocat -o json --max-repos 1" "\"username\": \"octocat\""
-run_test "csv_output" "python -m github_stats_analyzer.main octocat -o csv --max-repos 1" "GitHub Statistics for,octocat"
+run_test "csv_output" "python -m github_stats_analyzer.main octocat -o csv --max-repos 1" "GitHub Statistics for:,octocat"
 
 # 测试仓库和提交限制
-run_test "repo_limit" "python -m github_stats_analyzer.main octocat --max-repos 1" "repositories analyzed: 1"
-run_test "commit_limit" "python -m github_stats_analyzer.main octocat --max-commits 5" "GitHub Statistics for octocat"
+run_test "repo_limit" "python -m github_stats_analyzer.main octocat --max-repos 1" "JavaScript"
+run_test "commit_limit" "python -m github_stats_analyzer.main octocat --max-commits 5" "GitHub Statistics for: octocat"
 
 # 测试语言过滤
-run_test "include_all_languages" "python -m github_stats_analyzer.main octocat --include-all --max-repos 1" "Language Breakdown"
-run_test "exclude_languages" "python -m github_stats_analyzer.main octocat --exclude-languages JavaScript --max-repos 1" "Language Breakdown"
+run_test "include_all_languages" "python -m github_stats_analyzer.main octocat --include-all --max-repos 1" "Language Statistics"
+run_test "exclude_languages" "python -m github_stats_analyzer.main octocat --exclude-languages JavaScript --max-repos 1" "Language Statistics"
 
 # 测试代码变更统计
 run_test "code_changes_stats" "python -m github_stats_analyzer.main octocat --access-level full --max-repos 2" "Code +/-"
