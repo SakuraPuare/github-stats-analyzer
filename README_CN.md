@@ -248,3 +248,7 @@ asyncio.run(analyze_user("octocat", AccessLevel.FULL))
 ---
 
 由 [Cursor](https://cursor.sh) 生成 ❤️ 
+## 📊 最新分析结果
+
+在 [stats 分支](https://github.com/SakuraPuare/github-stats-analyzer/tree/stats/results/RESULT.md) 中查看最新分析结果。
+

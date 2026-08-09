@@ -249,3 +249,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 Generated with ❤️ by [Cursor](https://cursor.sh)
+## 📊 Latest Analysis Results
+
+View the latest analysis results in the [stats branch](https://github.com/SakuraPuare/github-stats-analyzer/tree/stats/results/RESULT.md).
+
