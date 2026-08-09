@@ -166,7 +166,8 @@ jobs:
     - name: Create test results branch
       run: |
         git checkout -b test-results
-        
+
+        mkdir -p test_results/
         cp test_report.md test_results/
         cp json_output.txt test_results/
         cp csv_output.txt test_results/
