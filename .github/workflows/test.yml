@@ -81,8 +81,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # 测试 JSON 输出
-        python -m github_stats_analyzer.main octocat -o json --max-repos 2 > json_output.txt
+        # 测试 JSON 输出 (tool logs go to stderr, JSON to stdout)
+        python -m github_stats_analyzer.main octocat -o json --max-repos 2 > json_output.txt 2>/dev/null
         if jq . json_output.txt > /dev/null 2>&1; then
           echo "✅ JSON output format test passed"
         else
@@ -92,7 +92,7 @@ jobs:
         fi
         
         # 测试 CSV 输出
-        python -m github_stats_analyzer.main octocat -o csv --max-repos 2 > csv_output.txt
+        python -m github_stats_analyzer.main octocat -o csv --max-repos 2 > csv_output.txt 2>/dev/null
         if grep -q "GitHub Statistics for,octocat" csv_output.txt; then
           echo "✅ CSV output format test passed"
         else
@@ -106,7 +106,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # 测试仓库数量限制
-        python -m github_stats_analyzer.main octocat --max-repos 1 > max_repos_output.txt
+        python -m github_stats_analyzer.main octocat --max-repos 1 > max_repos_output.txt 2>/dev/null
         if grep -q "repositories analyzed: 1" max_repos_output.txt; then
           echo "✅ Repository limit test passed"
         else
@@ -120,11 +120,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         # 测试包含所有语言
-        python -m github_stats_analyzer.main octocat --include-all --max-repos 2 > include_all_output.txt
+        python -m github_stats_analyzer.main octocat --include-all --max-repos 2 > include_all_output.txt 2>/dev/null
         echo "✅ Include all languages test passed"
         
         # 测试排除特定语言
-        python -m github_stats_analyzer.main octocat --exclude-languages JavaScript Python --max-repos 2 > exclude_langs_output.txt
+        python -m github_stats_analyzer.main octocat --exclude-languages JavaScript Python --max-repos 2 > exclude_langs_output.txt 2>/dev/null
         echo "✅ Exclude languages test passed"
     
     - name: Generate test report
